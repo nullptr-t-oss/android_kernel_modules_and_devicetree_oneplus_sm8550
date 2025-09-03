@@ -432,4 +432,7 @@
 #define OPLUS_IC_FUNC_UFCS_GET_POWER_INFO_EXT           (OPLUS_IC_FUNC_NUM_UFCS_START + 13)
 #define OPLUS_IC_FUNC_UFCS_IS_TEST_MODE                 (OPLUS_IC_FUNC_NUM_UFCS_START + 14)
 
-
+/* oplus_plc_strategy_type */
+#define PLC_STRATEGY_STEP	0
+#define PLC_STRATEGY_SIMPLE	1
+#define PLC_STRATEGY_PID	2

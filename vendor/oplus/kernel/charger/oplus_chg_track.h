@@ -131,6 +131,7 @@ enum oplus_chg_track_mos_device_error {
 #define OPLUS_CHG_TRACK_SCENE_GAGUE_DEFAULT	"default"
 #define OPLUS_CHG_TRACK_SCENE_GAGUE_SOC_1_PCT	"soc_smooth_to_1"
 #define OPLUS_CHG_TRACK_SCENE_GAUGE_BQFS_ERR "bqfs_err"
+#define OPLUS_CHG_TRACK_SCENE_GAUGE_CW_ERR "cw_err"
 enum oplus_chg_track_gague_device_error {
 	TRACK_GAGUE_ERR_DEFAULT,
 	TRACK_GAGUE_ERR_SEAL,
@@ -467,5 +468,6 @@ int oplus_track_upload_ntc_abnormal_info(int ntc_temp, char *ntc_name,
 						   char *scene, char *reason, char *other);
 int oplus_chg_track_upload_rechg_info(void);
 int oplus_chg_track_set_fcl_info(int type, int batt_volt, int batt_curr, int batt_temp);
+int oplus_chg_track_set_fcl_batt_r(int batt_r);
 
 #endif

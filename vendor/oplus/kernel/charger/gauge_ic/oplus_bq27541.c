@@ -5548,7 +5548,7 @@ static void oplus_hw_config_retry_work(struct work_struct *work)
 	oplus_set_device_name(chip, DEVICE_TYPE_BQ27541);
 }
 
-static void bq27541_hw_config(struct chip_bq27541 *chip)
+static int bq27541_hw_config(struct chip_bq27541 *chip)
 {
 	int ret = 0;
 	int flags = 0;
@@ -5581,10 +5581,10 @@ static void bq27541_hw_config(struct chip_bq27541 *chip)
 	gauge_read_i2c(chip, BQ27541_BQ27411_REG_CNTL, &flags);
 	udelay(66);
 	ret = gauge_read_i2c(chip, BQ27541_BQ27411_REG_CNTL, &flags);
-	if (ret < 0) {
+	if (ret > 0) {
 		chip->device_type = DEVICE_BQ27541;
 		pr_err(" error reading register %02x ret = %d\n", BQ27541_BQ27411_REG_CNTL, ret);
-		return;
+		return -ret;
 	}
 	udelay(66);
 	bq27541_cntl_cmd(chip, BQ27541_BQ27411_SUBCMD_CTNL_STATUS);
@@ -5598,8 +5598,10 @@ static void bq27541_hw_config(struct chip_bq27541 *chip)
 	bq27541_cntl_cmd(chip, BQ27541_BQ27411_SUBCMD_FW_VER);
 	udelay(66);
 	ret |= gauge_read_i2c(chip, BQ27541_BQ27411_REG_CNTL, &fw_ver);
-	if (ret)
+	if (ret > 0) {
 		pr_err("error to read BQ27541_BQ27411_REG_CNTL\n");
+		return -ret;
+	}
 
 device_type_set:
 	if (device_type == DEVICE_TYPE_BQ27411) {
@@ -5636,6 +5638,7 @@ device_type_set:
 	oplus_set_device_name(chip, device_type);
 	dev_err(chip->dev, "DEVICE_TYPE is 0x%02X, FIRMWARE_VERSION is 0x%02X batt_zy0603 = %d\n", device_type, fw_ver,
 		chip->batt_zy0603);
+	return 0;
 }
 
 #define OPLUS_GAUGE_ABNORMAL_VBATT_MAX (4800)
@@ -8837,10 +8840,21 @@ static int bq27541_driver_probe(struct i2c_client *client)
 static int bq27541_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
 #endif
 {
+	struct device_node *node = client->dev.of_node;
 	struct chip_bq27541 *fg_ic;
 	struct oplus_gauge_chip *chip;
 	int rerun_num = 3;
 	int rc = 0;
+	int gauge_num = 0;
+
+	rc = of_property_read_u32(node, "qcom,gauge_num", &gauge_num);
+	if (rc)
+		gauge_num = 0;
+	/* increase gauge_num condition avoid missing sub gauge initialization */
+	if (!oplus_gauge_check_chip_is_null() && (gauge_num == 0)) {
+		chg_err("gauge chip_is not null, skip %s, gauge_num %d \n", __func__, gauge_num);
+		return -ENOMEM;
+	}
 
 	fg_ic = kzalloc(sizeof(*fg_ic), GFP_KERNEL);
 	if (!fg_ic) {
@@ -8857,6 +8871,7 @@ static int bq27541_driver_probe(struct i2c_client *client, const struct i2c_devi
 	mutex_init(&fg_ic->calib_time_mutex);
 	mutex_init(&fg_ic->gauge_alt_manufacturer_access);
 	bq27541_parse_dt(fg_ic);
+
 	if (fg_ic->gauge_num == 0) {
 		gauge_ic = fg_ic;
 	} else {
@@ -8864,7 +8879,11 @@ static int bq27541_driver_probe(struct i2c_client *client, const struct i2c_devi
 	}
 rerun:
 	rerun_num--;
-	bq27541_hw_config(fg_ic);
+	rc = bq27541_hw_config(fg_ic);
+	if (rc < 0) {
+		dev_err(&client->dev, "bq27541_hw_config fail! bq27541_driver_probe fail! \n");
+		return -EFAULT;
+	}
 
 	INIT_WORK(&fg_ic->fcc_too_small_check_work, bq27541_fcc_too_small_check_work);
 	if (fg_ic->batt_zy0603) {

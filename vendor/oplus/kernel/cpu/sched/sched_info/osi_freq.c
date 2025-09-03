@@ -39,6 +39,8 @@ void get_cpufreq_info(bool *is_sample)
 		start_cpu = cluster[cls].start_cpu;
 		pol = cpufreq_cpu_get(start_cpu);
 		if (likely(pol)) {
+			if (!pol->freq_table)
+				return;
 			cur_idx = cpufreq_table_find_index(pol, pol->cur);
 			min_idx = cpufreq_table_find_index(pol, pol->min);
 			max_idx = cpufreq_table_find_index(pol, pol->max);
@@ -201,6 +203,10 @@ static int proc_long_freq_duration_show(struct seq_file *m, void *v)
 			continue;
 		freq_duration = per_cpu_ptr(&freq_duration_info, cpu);
 		seq_printf(m, "cpu(%d), %7s, %10s\n", cpu, "opp", "duration");
+		if (!freq_duration->freq_table || !freq_duration->duration_table) {
+			seq_printf(m, "There is no space for freq_duration\n");
+			return 0;
+		}
 		for (i = 0; i < freq_duration->opp_num; i++) {
 			seq_printf(m, "%6d, %7u, %10lu\n", i, freq_duration->freq_table[i],
 				freq_duration->duration_table[i] >> 10);
