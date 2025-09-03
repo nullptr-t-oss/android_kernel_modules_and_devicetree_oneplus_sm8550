@@ -930,7 +930,7 @@ static ssize_t proc_lowend_plat_opt_read(struct file *file, char __user *buf,
 	char buffer[32];
 	size_t len = 0;
 
-	len = snprintf(buffer, sizeof(buffer), "lowend_plat_opt=%d\n", global_lowend_plat_opt);
+	len = snprintf(buffer, sizeof(buffer), "%d\n", global_lowend_plat_opt);
 
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }

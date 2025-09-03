@@ -3334,6 +3334,30 @@ static int synaptics_enable_game_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 
 	return ret;
 }
+
+static int synaptics_enable_waterproof_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
+{
+	int8_t ret = -1;
+
+	TPD_DEBUG("%s:enable = %d\n", __func__, enable);
+
+	if (enable) {
+		ret = syna_tcm_set_dynamic_config(tcm_hcd, DC_WATERPROOF_ENABLE, 1);
+		if (ret < 0) {
+			TPD_INFO("%s:failed to enable waterproof mode\n", __func__);
+			return ret;
+		}
+	} else {
+		ret = syna_tcm_set_dynamic_config(tcm_hcd, DC_WATERPROOF_ENABLE, 0);
+		if (ret < 0) {
+			TPD_INFO("%s:failed to disable waterproof mode\n", __func__);
+			return ret;
+		}
+	}
+
+	return ret;
+}
+
 /* void tp_wait_hdl_finished(void); */
 
 static int syna_mode_switch(void *chip_data, work_mode mode, int flag)
@@ -3411,6 +3435,13 @@ static int syna_mode_switch(void *chip_data, work_mode mode, int flag)
 		ret = synaptics_enable_game_mode(tcm_hcd, flag);
 		if (ret < 0) {
 			TPD_INFO("%s: enable game mode : %d failed\n", __func__, flag);
+		}
+		break;
+
+	case MODE_WATERPROOF:
+		ret = synaptics_enable_waterproof_mode(tcm_hcd, flag);
+		if (ret < 0) {
+			TPD_INFO("%s: enable waterproof mode : %d failed\n", __func__, flag);
 		}
 		break;
 
@@ -5179,6 +5210,54 @@ static void syna_getglove_mode_status(void *chip_data, int *enable)
 	return;
 }
 
+static int syna_tcm_diaphragm_touch_lv_set(void *chip_data, int level)
+{
+	struct syna_tcm_hcd *tcm_info = (struct syna_tcm_hcd *)chip_data;
+	unsigned short regval = 0;
+	int retval = 0;
+
+	retval = syna_tcm_get_dynamic_config(tcm_info, DC_LOW_TEMP_ENABLE, &regval);
+	if (retval < 0) {
+		TPD_INFO("Failed to get diaphragm_touch config\n");
+		return 0;
+	}
+
+	switch (level) {
+	case DIAPHRAGM_DEFAULT_MODE:
+		regval = 0xfcff & regval;
+		break;
+	case DIAPHRAGM_FILM_MODE:
+		regval = 0xfcff & regval;
+		regval = 0x0100 | regval;
+		break;
+	case DIAPHRAGM_WATERPROO_MODE:
+		regval = 0xfcff & regval;
+		regval = 0x0200 | regval;
+		break;
+	case DIAPHRAGM_FILM_WATERPROO_MODE:
+		regval = 0xfcff & regval;
+		regval = 0x0200 | regval;
+		break;
+	default:
+		TPD_INFO("error, level = %d", level);
+		return 0;
+	}
+
+	retval = syna_tcm_set_dynamic_config(tcm_info, DC_LOW_TEMP_ENABLE, regval);
+	if (retval < 0) {
+		TPD_INFO("Failed to set diaphragm_touch config\n");
+		return 0;
+	}
+
+	retval = syna_tcm_get_dynamic_config(tcm_info, DC_LOW_TEMP_ENABLE, &regval);
+	if (retval < 0) {
+		TPD_INFO("Failed to get diaphragm_touch config\n");
+		return 0;
+	}
+	TPD_INFO("diaphragm_touch_lv_set level = %d regval = %d", level, regval);
+
+	return 0;
+}
 
 static struct oplus_touchpanel_operations syna_tcm_ops = {
 	.ftm_process       = syna_ftm_process,
@@ -5208,6 +5287,7 @@ static struct oplus_touchpanel_operations syna_tcm_ops = {
 	.smooth_lv_set    = syna_tcm_smooth_lv_set,
 	.sensitive_lv_set = syna_tcm_sensitive_lv_set,
 	.get_glove_mode         = syna_getglove_mode_status,
+	.diaphragm_touch_lv_set    = syna_tcm_diaphragm_touch_lv_set,
 };
 
 /*

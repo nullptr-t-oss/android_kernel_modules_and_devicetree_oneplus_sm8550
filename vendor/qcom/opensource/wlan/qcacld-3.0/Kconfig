@@ -147,4 +147,8 @@ config WLAN_FEATURE_SARV1_TO_SARV2
 	bool "Enable conversion of SAR v1 to v2 feature"
 	default n
 
+config FEATURE_WLAN_CH_AVOID_EXT
+	bool "Enable FEATURE_WLAN_CH_AVOID_EXT"
+	default n
 endif # QCA_CLD_WLAN
+
