@@ -1050,6 +1050,10 @@ static struct flag_reason_table track_flag_reason_table[] = {
 	{ TRACK_NOTIFY_FLAG_I2C_ABNORMAL, "I2cAbnormal" },
 	{ TRACK_NOTIFY_FLAG_BOOST_BUCK_ERR, "BoostICAbnormal" },
 	{ TRACK_NOTIFY_FLAG_NTC_ABNORMAL, "NTCAbnormal" },
+<<<<<<< HEAD
+	{ TRACK_NOTIFY_FLAG_IC_BURN, "IcBurn" },
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 
 	{ TRACK_NOTIFY_FLAG_UFCS_ABNORMAL, "UfcsAbnormal" },
 	{ TRACK_NOTIFY_FLAG_COOLDOWN_ABNORMAL, "CoolDownAbnormal" },
@@ -6048,7 +6052,12 @@ oplus_chg_track_wired_fastchg_exit_code(struct oplus_chg_track *track_chip)
 		if (!code || code == TRACK_CP_VOOCPHY_FULL ||
 		    code == TRACK_CP_VOOCPHY_BATT_TEMP_OVER ||
 		    code == TRACK_CP_VOOCPHY_USER_EXIT_FASTCHG ||
+<<<<<<< HEAD
+		    code == TRACK_CP_VOOCPHY_SWITCH_TEMP_RANGE||
+		    code == TRACK_CP_VOOCPHY_IC_BURN)
+=======
 		    code == TRACK_CP_VOOCPHY_SWITCH_TEMP_RANGE)
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 			ret = true;
 		else
 			ret = false;
@@ -7069,6 +7078,13 @@ static int oplus_chg_track_upload_ic_err_info(struct oplus_chg_track *track)
 		track->ic_err_msg_load_trigger.flag_reason =
 			TRACK_NOTIFY_FLAG_NTC_ABNORMAL;
 		break;
+<<<<<<< HEAD
+	case OPLUS_IC_ERR_BURN:
+		track->ic_err_msg_load_trigger.flag_reason =
+			TRACK_NOTIFY_FLAG_IC_BURN;
+		break;
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	case OPLUS_IC_ERR_UNKNOWN:
 	default:
 		chg_err("unsupported error type(%d)\n", err_type);

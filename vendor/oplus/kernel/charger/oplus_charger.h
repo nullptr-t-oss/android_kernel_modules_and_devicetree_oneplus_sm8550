@@ -1332,6 +1332,10 @@ struct oplus_chg_chip {
 	int boot_mode;
 	int vooc_project;
 	int limit_current_area_vooc_project;
+<<<<<<< HEAD
+	int sw_check_full_cnt;
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	bool suspend_after_full;
 	bool check_batt_full_by_sw;
 	bool external_gauge;
@@ -1957,6 +1961,10 @@ int oplus_chg_get_cool_down_status(void);
 int oplus_chg_get_normal_cool_down_status(void);
 void oplus_smart_charge_by_cool_down(struct oplus_chg_chip *chip, int val);
 int oplus_convert_current_to_level(struct oplus_chg_chip *chip, int val);
+<<<<<<< HEAD
+int oplus_convert_level_to_current(struct oplus_chg_chip *chip, int val);
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 int oplus_convert_pps_current_to_level(struct oplus_chg_chip *chip, int val);
 void oplus_smart_charge_by_shell_temp(struct oplus_chg_chip *chip, int val);
 int oplus_smart_charge_by_bcc(struct oplus_chg_chip *chip, int val);

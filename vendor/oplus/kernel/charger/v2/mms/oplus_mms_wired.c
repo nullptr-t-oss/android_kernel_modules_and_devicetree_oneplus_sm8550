@@ -1982,7 +1982,11 @@ static int oplus_usbtemp_dischg_action(struct oplus_mms_wired *chip)
 			rc = -ENOTSUPP;
 		if (rc < 0)
 			chg_err("can't set charge suspend, rc=%d\n", rc);
+<<<<<<< HEAD
+		usleep_range(20000, 20000);
+=======
 		usleep_range(5000, 5000);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		chg_err("set vbus down");
 		oplus_chg_ic_func(chip->buck_ic,
 				  OPLUS_IC_FUNC_SET_USB_DISCHG_ENABLE, true);

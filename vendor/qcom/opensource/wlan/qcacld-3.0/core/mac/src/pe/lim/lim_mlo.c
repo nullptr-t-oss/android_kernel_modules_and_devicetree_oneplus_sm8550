@@ -1183,8 +1183,20 @@ QDF_STATUS lim_store_mlo_ie_raw_info(uint8_t *ie, uint8_t *sta_prof_ie,
 				return QDF_STATUS_E_INVAL;
 			}
 
+<<<<<<< HEAD
+			for (i = 0; i < pfrm[TAG_LEN_POS]; i++) {
+				if (copied > ml_ie_len) {
+					pe_debug("Buf length exceeded, copied %d ml_ie_len %d",
+						 copied, ml_ie_len);
+					qdf_mem_free(buf);
+					return QDF_STATUS_E_INVAL;
+				}
+				sta_data[index++] = buf[copied++];
+			}
+=======
 			for (i = 0; i < pfrm[TAG_LEN_POS]; i++)
 				sta_data[index++] = buf[copied++];
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 			sta_prof->num_data = index;
 
 			if (copied < ml_ie_len &&

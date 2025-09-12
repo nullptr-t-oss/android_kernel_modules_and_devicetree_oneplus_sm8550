@@ -3051,7 +3051,11 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 		if (!(tmp_new[0] == WLAN_ELEMID_NONTX_BSSID_CAP ||
 		      tmp_new[0] == WLAN_ELEMID_SSID ||
 		      tmp_new[0] == WLAN_ELEMID_MULTI_BSSID_IDX ||
+<<<<<<< HEAD
+		      ((tmp_new[0] == WLAN_ELEMID_EXTN_ELEM) && tmp_new[1] &&
+=======
 		      ((tmp_new[0] == WLAN_ELEMID_EXTN_ELEM) &&
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		       (tmp_new[2] == WLAN_EXTN_ELEMID_NONINHERITANCE)))) {
 			if ((pos + tmp_new[1] + MIN_IE_LEN) <=
 			    (new_ie + ielen)) {

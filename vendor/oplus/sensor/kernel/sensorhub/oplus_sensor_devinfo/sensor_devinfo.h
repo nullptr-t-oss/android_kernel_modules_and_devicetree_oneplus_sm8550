@@ -89,6 +89,10 @@ enum panel_id{
 	P_7,
 	ILI7807S,
 	DJN,
+<<<<<<< HEAD
+	CSOT_TD4376B,
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	PANEL_NUM
 };
 

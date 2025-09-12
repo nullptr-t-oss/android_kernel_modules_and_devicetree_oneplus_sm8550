@@ -94,6 +94,10 @@ static int oplus_chg_get_pps_status(struct oplus_chg_ic_dev *ic_dev, u32 *src_in
 #define PPS_RANDOM_NUMBER	    4
 #define NO_OF_DATA_OBJECTS_MAX      7
 #define PPS_KEY_COUNT		    4
+<<<<<<< HEAD
+#define LOW_BATT_SOC 1
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 
 static uint32_t pps_random[PPS_RANDOM_NUMBER] = { 1111, 2222, 3333, 4444 };
 static uint32_t pps_adapter_result[NO_OF_DATA_OBJECTS_MAX] = { 0 };
@@ -395,6 +399,33 @@ int get_uisoc(struct mtk_charger *info)
 	return ret;
 }
 
+<<<<<<< HEAD
+int oplus_chg_get_batt_soc(void)
+{
+	int batt_soc = 50; /* default batt_soc set 50 */
+	struct oplus_mms *gauge_topic;
+	union mms_msg_data data = { 0 };
+	int rc;
+
+	gauge_topic = oplus_mms_get_by_name("gauge");
+	if (!gauge_topic)
+		return batt_soc;
+
+	rc = oplus_mms_get_item_data(gauge_topic, GAUGE_ITEM_SOC, &data, true);
+	if (!rc) {
+		batt_soc = data.intval;
+		if (batt_soc < 0) {
+			chg_err("batt soc not ready, batt_soc=%d\n", batt_soc);
+			batt_soc = 50;
+		}
+	}
+
+	chr_info("get batt soc = %d\n", batt_soc);
+	return batt_soc;
+}
+
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 int get_battery_voltage(struct mtk_charger *info)
 {
 	union power_supply_propval prop;
@@ -5333,6 +5364,10 @@ static int mtk_chg_set_otg_boost_curr_limit(struct oplus_chg_ic_dev *ic_dev, int
 	int rc;
 	struct mtk_charger *info = oplus_chg_ic_get_drvdata(ic_dev);
 	struct charger_device *chg;
+<<<<<<< HEAD
+	int batt_soc;
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 
 	if (info == NULL) {
 		chg_err("info is NULL");
@@ -5340,7 +5375,18 @@ static int mtk_chg_set_otg_boost_curr_limit(struct oplus_chg_ic_dev *ic_dev, int
 	}
 
 	chg = info->chg1_dev;
+<<<<<<< HEAD
+	batt_soc = oplus_chg_get_batt_soc();
+	chg_info("mtk_chg_set_otg_boost_curr_limit get batt_soc is %d\n", batt_soc);
+	if ((batt_soc <= LOW_BATT_SOC) && (info->low_batt_otg_boost_curr_ua != 0) &&
+		(info->low_batt_otg_boost_curr_ua <= curr_uA)) {
+		curr_uA = info->low_batt_otg_boost_curr_ua;
+		chg_info("batt_soc is low, set curr %d ua\n", curr_uA);
+	}
+	rc = charger_dev_set_boost_current_limit(chg, curr_uA);
+=======
 	rc =  charger_dev_set_boost_current_limit(chg, curr_uA);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	if (rc < 0)
 		chg_err("set otg cc err, rc=%d\n", rc);
 	return rc;

@@ -27,6 +27,10 @@
 #define REG_IC_STATE            0xA7
 #define REG_STB_CUR_H           0xA8
 #define REG_STB_CUR_L           0xA9
+<<<<<<< HEAD
+#define REG_FW_CHECK            0xAA
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 #define REG_FW_VERSION          0xAB
 #define REG_BAT_PROFILE         0x10
 
@@ -46,6 +50,11 @@
 
 #define CWFG_NAME               "cw2217"
 #define SIZE_OF_PROFILE         80
+<<<<<<< HEAD
+#define CW_INFO_LEN             255
+#define CW_NAME_LEN             12
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 
 #define QUEUE_DELAYED_WORK_TIME  5000
 #define QUEUE_START_WORK_TIME    50
@@ -78,11 +87,22 @@
 #define CW2217_NOT_ACTIVE          1
 #define CW2217_PROFILE_NOT_READY   2
 #define CW2217_PROFILE_NEED_UPDATE 3
+<<<<<<< HEAD
+#define CW2217_CHECK_UPDATE 4
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 
 #define NUM_0 0
 #define NUM_1 1
 #define ERR_NUM -1
 
+<<<<<<< HEAD
+#define BATTID_ARR_LEN 5
+#define BATTID_ARR_WIDTH 2
+#define BAT_TYPE_UNKNOWN 0
+
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 #define cw_printk(fmt, arg...) {                                                                          \
 		if (CWFG_ENABLE_LOG)                                                   \
 			printk("FG_CW2217 : %s-%d : " fmt, __FUNCTION__ , __LINE__, ##arg);  \
@@ -119,12 +139,35 @@ struct cw_battery {
 	int  cycle;
 	int  soh;
 	int  fcc;
+<<<<<<< HEAD
+	int  design_capacity;
+	int  rated_capacity;
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	int  fw_version;
 	struct iio_channel	*batt_id_chan;
 	int cw_ui_full;
 	bool cw_switch_config_profile;
+<<<<<<< HEAD
+	bool ignore_battery_authenticate;
 	int cw_user_rsense;
 	unsigned char cw_config_profile[SIZE_OF_PROFILE];
+	u32 batid_voltage_range[BATTID_ARR_LEN][BATTID_ARR_WIDTH];
+
+	struct mutex track_upload_lock;
+	struct mutex track_cw_err_lock;
+	u32 debug_force_cw_err;
+	bool cw_err_uploading;
+	oplus_chg_track_trigger *cw_err_load_trigger;
+	struct delayed_work cw_err_load_trigger_work;
+	struct delayed_work cw_track_update_work;
+	char track_info[CW_INFO_LEN];
+	u8 device_name[CW_NAME_LEN];
+	int device_type;
+=======
+	int cw_user_rsense;
+	unsigned char cw_config_profile[SIZE_OF_PROFILE];
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 };
 void  cw2217_init(void);
 void  cw2217_exit(void);

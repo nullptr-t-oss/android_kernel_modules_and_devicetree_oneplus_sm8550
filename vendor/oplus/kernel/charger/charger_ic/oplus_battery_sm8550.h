@@ -40,8 +40,16 @@
 #define PPS_OPCODE_READ_BUFFER    0x10004
 #define OEM_READ_WAIT_TIME_MS    500
 #define TRACK_OPCODE_READ_BUFFER	0x10005
+<<<<<<< HEAD
+#define AP_OPCODE_READ_BUFFER  0x10007
 #define TRACK_READ_WAIT_TIME_MS	2000
 #define MAX_OEM_PROPERTY_DATA_SIZE 128
+#define AP_READ_WAIT_TIME_MS      500
+#define MAX_AP_PROPERTY_DATA_SIZE 512
+=======
+#define TRACK_READ_WAIT_TIME_MS	2000
+#define MAX_OEM_PROPERTY_DATA_SIZE 128
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 #endif
 
 #define MSG_OWNER_BC			32778
@@ -130,11 +138,44 @@ struct oem_read_buffer_resp_msg {
 	u32 data_buffer[MAX_OEM_PROPERTY_DATA_SIZE];
 	u32 data_size;
 };
+<<<<<<< HEAD
+
+struct oplus_ap_read_req_msg {
+	struct pmic_glink_hdr hdr;
+	u32 message_id;
+};
+
+struct oplus_ap_read_buffer_resp_msg {
+	struct pmic_glink_hdr hdr;
+	u32 message_id;
+	u8 data_buffer[MAX_AP_PROPERTY_DATA_SIZE];
+	u32 data_size;
+};
+
+enum oplus_ap_message_id {
+	AP_MESSAGE_ACK,
+	AP_MESSAGE_GET_GAUGE_REG_INFO,
+	AP_MESSAGE_GET_GAUGE_CALIB_TIME,
+	AP_MESSAGE_MAX_SIZE = 32,
+};
+
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 struct adsp_track_read_req_msg {
 	struct pmic_glink_hdr hdr;
 	u32 data_size;
 };
 
+<<<<<<< HEAD
+#define GAUGE_CALIB_ARGS_LEN 12
+struct gauge_calib_info {
+	int dod_time;
+	int qmax_time;
+	unsigned char calib_args[GAUGE_CALIB_ARGS_LEN];
+}__attribute__((aligned(4)));
+
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 struct adsp_track_read_resp_msg {
 	struct pmic_glink_hdr hdr;
 	u8 data_buffer[ADSP_TRACK_PROPERTY_DATA_SIZE_MAX];
@@ -650,6 +691,12 @@ struct battery_chg_dev {
 	struct mutex	pps_read_buffer_lock;
 	struct completion	 pps_read_ack;
 	struct oem_read_buffer_resp_msg  pps_read_buffer_dump;
+<<<<<<< HEAD
+	struct oplus_ap_read_buffer_resp_msg	*ap_read_buffer_dump;
+	struct mutex				ap_read_buffer_lock;
+	struct completion			ap_read_ack[AP_MESSAGE_MAX_SIZE];
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 #endif
 	/* To track the driver initialization status */
 	bool				initialized;

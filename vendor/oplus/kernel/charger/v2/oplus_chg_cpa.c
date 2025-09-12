@@ -88,6 +88,10 @@ struct oplus_cpa {
 	unsigned int vooc_sid;
 	bool ufcs_online;
 	bool retention_state;
+<<<<<<< HEAD
+	bool pre_retention_state;
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	bool retention_state_ready;
 
 	bool wired_present;
@@ -458,7 +462,13 @@ static void oplus_cpa_protocol_switch_work(struct work_struct *work)
 		if (rc != -EBUSY) {
 			chg_err("switch %s protocol error, rc=%d\n", get_protocol_name_str(type), rc);
 			oplus_cpa_set_current_protocol_type(cpa, CHG_PROTOCOL_INVALID);
+<<<<<<< HEAD
+			mutex_lock(&cpa->cpa_request_lock);
 			protocol_identify_request(cpa, cpa->protocol_to_be_switched);
+			mutex_unlock(&cpa->cpa_request_lock);
+=======
+			protocol_identify_request(cpa, cpa->protocol_to_be_switched);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		}
 		return;
 	} else {
@@ -469,9 +479,17 @@ static void oplus_cpa_protocol_switch_work(struct work_struct *work)
 			chg_info("switch %s schedule protocol_switch_timeout_work\n", get_protocol_name_str(type));
 		}
 		mutex_unlock(&cpa->start_lock);
+<<<<<<< HEAD
+		mutex_lock(&cpa->cpa_request_lock);
 		protocol = READ_ONCE(cpa->protocol_to_be_switched);
 		protocol &= ~BIT(type);
 		WRITE_ONCE(cpa->protocol_to_be_switched, protocol);
+		mutex_unlock(&cpa->cpa_request_lock);
+=======
+		protocol = READ_ONCE(cpa->protocol_to_be_switched);
+		protocol &= ~BIT(type);
+		WRITE_ONCE(cpa->protocol_to_be_switched, protocol);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	}
 	chg_info("switch to %s protocol\n", get_protocol_name_str(type));
 }
@@ -504,10 +522,17 @@ static void oplus_cpa_switch_end_work(struct work_struct *work)
 		}
 	}
 
+<<<<<<< HEAD
+	mutex_lock(&cpa->cpa_request_lock);
+	chg_info("%s protocol identify end, to_be_switched=0x%x, disable_mask=0x%lx\n",
+		 get_protocol_name_str(type), cpa->protocol_to_be_switched,
+		 cpa->protocol_disable_mask);
+=======
 	chg_info("%s protocol identify end, to_be_switched=0x%x, disable_mask=0x%lx\n",
 		 get_protocol_name_str(type), cpa->protocol_to_be_switched,
 		 cpa->protocol_disable_mask);
 	mutex_lock(&cpa->cpa_request_lock);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	protocol_identify_request(cpa, READ_ONCE(cpa->protocol_to_be_switched));
 	mutex_unlock(&cpa->cpa_request_lock);
 }
@@ -548,7 +573,13 @@ static void oplus_cpa_chg_type_change_work(struct work_struct *work)
 						break;
 					}
 					chg_info("wired_type change to PPS, retry PPS");
+<<<<<<< HEAD
+					mutex_lock(&cpa->cpa_request_lock);
 					protocol_identify_request(cpa, BIT(CHG_PROTOCOL_PPS));
+					mutex_unlock(&cpa->cpa_request_lock);
+=======
+					protocol_identify_request(cpa, BIT(CHG_PROTOCOL_PPS));
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 					break;
 				}
 				fallthrough;
@@ -733,8 +764,15 @@ static void oplus_cpa_wired_subs_callback(struct mms_subscribe *subs,
 				cpa->wired_online = false;
 				if (!cpa->retention_topic)
 					schedule_work(&cpa->wired_offline_work);
+<<<<<<< HEAD
+				else if ((cpa->retention_state_ready || cpa->pre_retention_state)
+					&& !cpa->retention_state)
+					schedule_work(&cpa->wired_offline_work);
+				cpa->pre_retention_state = cpa->retention_state;
+=======
 				else if (cpa->retention_state_ready && !cpa->retention_state)
 					schedule_work(&cpa->wired_offline_work);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 			} else {
 				if (!cpa->retention_state)
 					cpa->retention_state_ready = false;
@@ -896,6 +934,11 @@ static void oplus_cpa_retention_subs_callback(struct mms_subscribe *subs,
 			if (!data.intval && cpa->retention_state != !!data.intval)
 				schedule_work(&cpa->wired_offline_work);
 			cpa->retention_state = !!data.intval;
+<<<<<<< HEAD
+			if (cpa->retention_state)
+				cpa->pre_retention_state = cpa->retention_state;
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 			break;
 		case RETENTION_ITEM_STATE_READY:
 			cpa->retention_state_ready = true;

@@ -3892,7 +3892,11 @@ static int psy_charger_get_property(struct power_supply *psy,
 
 	info = (struct mtk_charger *)power_supply_get_drvdata(psy);
 
+<<<<<<< HEAD
+	chr_debug("%s psp:%d\n",
+=======
 	chr_err("%s psp:%d\n",
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		__func__, psp);
 
 

@@ -763,6 +763,10 @@ static void sc8517_hardware_init(struct oplus_voocphy_manager *chip)
 	sc8517_write_byte(chip->client, SC8517_REG_29, 0x05); /* Masked Pulse_filtered, RX_Start,Tx_Done,soft intflag */
 	sc8517_write_byte(chip->client, SC8517_REG_10, 0x79); /* Masked Pulse_filtered, RX_Start,Tx_Done */
 	sc8517_write_byte(chip->client, SC8517_REG_03, 0xFF); /* set rvs and fwd ocp */
+<<<<<<< HEAD
+	sc8517_write_byte(chip->client, SC8517_REG_12, 0x10); /* set OCP trigger time to 10us */
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 	if (get_eng_version() == HIGH_TEMP_AGING)
 		sc8517_write_byte(chip->client, SC8517_REG_0F, 0x06); /* mask 100/120 TDIE alarm */

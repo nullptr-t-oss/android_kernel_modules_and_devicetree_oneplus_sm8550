@@ -231,7 +231,11 @@ static int devinfo_read_emmc_func(struct seq_file *s, void *v)
 		break;
 	case 0xD6:
 		if (NULL != strstr(mmc->card->cid.prod_name, "C9C761") || NULL != strstr(mmc->card->cid.prod_name, "C9C762")
+<<<<<<< HEAD
+			|| NULL != strstr(mmc->card->cid.prod_name, "C9C764") || NULL != strstr(mmc->card->cid.prod_name, "C9A612")) {
+=======
 			|| NULL != strstr(mmc->card->cid.prod_name, "C9C764")) {
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 			manufacture = "FORESEE";
 		} else {
 			manufacture = "HG";
@@ -240,6 +244,12 @@ static int devinfo_read_emmc_func(struct seq_file *s, void *v)
 	case 0xf4:
 		manufacture = "BIWIN";
 		break;
+<<<<<<< HEAD
+	case 0xab:
+		manufacture = "BIWIN";
+		break;
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	default:
 		printk("%s unknown mmc->card->cid.manfid is %x\n", __func__, mmc->card->cid.manfid);
 		manufacture = "Unknown";

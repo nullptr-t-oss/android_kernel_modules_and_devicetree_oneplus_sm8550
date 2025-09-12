@@ -7907,8 +7907,15 @@ static int oplus_chg_set_input_current(int current_ma)
 		goto aicl_return;
 	}
 
+<<<<<<< HEAD
+	if (max_pdo_current > 0) {
+		current_ma = min(current_ma, chip->pd_curr_max);
+		current_ma = min(current_ma, max_pdo_current);
+	}
+=======
 	if (max_pdo_current > 0)
 		current_ma = min(current_ma, chip->pd_curr_max);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	chg_err("current_ma = %d\n", current_ma);
 
 	rc = write_property_id(bcdev, pst, prop_id, DEFAULT_CURR_BY_CC * 1000);

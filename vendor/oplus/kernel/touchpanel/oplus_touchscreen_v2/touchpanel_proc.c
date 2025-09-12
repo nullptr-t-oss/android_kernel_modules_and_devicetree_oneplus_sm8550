@@ -4034,12 +4034,21 @@ static ssize_t proc_force_water_mode_read(struct file *file, char __user *buffer
 	char page[PAGESIZE] = {0};
 	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
 
+<<<<<<< HEAD
+	if (!ts || !ts->chip_data || !ts->ts_ops) {
+=======
 	if (!ts) {
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		snprintf(page, PAGESIZE - 1, "%d\n", -1); /*no support*/
 
 	} else {
 		/*support*/
+<<<<<<< HEAD
+		if (ts->ts_ops->get_water_mode)
+			ts->ts_ops->get_water_mode(ts->chip_data);
+=======
 		ts->ts_ops->get_water_mode(ts->chip_data);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		TP_INFO(ts->tp_index, "%s:  water_mode 0x%x", __func__, ts->water_mode);
 		snprintf(page, PAGESIZE - 1, "%d\n", ts->water_mode);
 	}

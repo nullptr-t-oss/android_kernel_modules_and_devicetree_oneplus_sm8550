@@ -522,6 +522,16 @@
                         "zh": "BATT_BAL错误"
                     },
                     "str": "BATT_BAL"
+<<<<<<< HEAD
+                },
+                {
+                    "lable": "OPLUS_IC_ERR_BURN",
+                    "desc": {
+                        "zh": "IC烧坏"
+                    },
+                    "str": "BURN"
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
                 }
             ]
         },

@@ -1253,6 +1253,17 @@ lim_check_oci_match(struct mac_context *mac, struct pe_session *pe_session,
 	 * Primary channel      : 1 byte
 	 * Freq_seg_1_ch_num    : 1 byte
 	 */
+<<<<<<< HEAD
+
+	if (oci_ie[SIR_MAC_IE_LEN_OFFSET] <
+	    MIN_OCI_IE_LEN - sizeof(struct ie_header)) {
+		pe_err("OCI len %d is incorrect",
+		       oci_ie[SIR_MAC_IE_LEN_OFFSET]);
+		return false;
+	}
+
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	status = dot11f_unpack_ie_oci(mac,
 				      (uint8_t *)&oci_ie[OCI_IE_OP_CLS_OFFSET],
 				      oci_ie[SIR_MAC_IE_LEN_OFFSET] -

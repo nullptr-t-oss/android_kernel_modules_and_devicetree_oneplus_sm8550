@@ -3009,6 +3009,11 @@ static ssize_t protocol_type_show(struct device *dev,
 	}
 
 	if (((last_fast_chg_type != CHARGER_SUBTYPE_DEFAULT) &&
+<<<<<<< HEAD
+		(last_fast_chg_type != CHARGER_SUBTYPE_PD) &&
+		(last_fast_chg_type != CHARGER_SUBTYPE_QC) &&
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		oplus_quirks_keep_connect_status() == 1) ||
 		(chip->plc_support &&
 		(chip->curr_plc_status == PLC_STATUS_ENABLE || chip->plc_status == PLC_STATUS_WAIT)))

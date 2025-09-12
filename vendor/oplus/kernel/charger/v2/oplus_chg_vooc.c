@@ -72,6 +72,10 @@
 	round_jiffies_relative(msecs_to_jiffies(OPLUS_VOOC_BCC_UPDATE_TIME))
 #define SILICON_VOOC_SOC_RANGE_NUM	5
 #define VOOC_CONNECT_ERROR_COUNT_LEVEL			3
+<<<<<<< HEAD
+#define MAX_VOOC_CONNECT_ERROR_COUNT_LEVEL		18
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 #define ABNORMAL_ADAPTER_CONNECT_ERROR_COUNT_LEVEL	12
 #define ABNORMAL_65W_ADAPTER_CONNECT_ERROR_COUNT_LEVEL	8
 #define WAIT_BC1P2_GET_TYPE 600
@@ -745,9 +749,15 @@ static int oplus_vooc_cpa_switch_end(struct oplus_chg_vooc *chip)
 		return 0;
 	if (chip->vooc_online || chip->vooc_online_keep)
 		return 0;
+<<<<<<< HEAD
+	if (chip->retention_topic && (chip->vooc_fastchg_data == VOOC_NOTIFY_FAST_ABSENT ||
+		chip->vooc_fastchg_data == VOOC_NOTIFY_LOW_TEMP_FULL) && !chip->retention_state_ready) {
+		chg_info("vooc absent/low_temp_full,wait retention state ready\n");
+=======
 	if (chip->retention_topic && chip->vooc_fastchg_data == VOOC_NOTIFY_FAST_ABSENT &&
 		!chip->retention_state_ready) {
 		chg_info("vooc absent wait retention state ready\n");
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		return 0;
 	}
 	oplus_mms_get_item_data(chip->cpa_topic, CPA_ITEM_ALLOW, &data, true);
@@ -4509,6 +4519,14 @@ static void oplus_vooc_retention_disconnect_work(struct work_struct *work)
 			chip->retention_fast_chg_status = 0;
 			break;
 		default:
+<<<<<<< HEAD
+			if (chip->irq_plugin && (get_client_vote(chip->common_chg_suspend_votable,
+				MMI_CHG_VOTER) > 0)) {
+				chip->normal_connect_count_level++;
+				chg_info("normal_connect_count_level:%d\n", chip->normal_connect_count_level);
+			}
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 			break;
 		}
 
@@ -4529,8 +4547,14 @@ static void oplus_vooc_retention_disconnect_work(struct work_struct *work)
 
 	oplus_mms_get_item_data(chip->retention_topic, RETENTION_ITEM_DISCONNECT_COUNT, &data, true);
 	chip->vooc_connect_error_count = data.intval;
+<<<<<<< HEAD
+	if ((chip->vooc_connect_error_count >
+		(chip->connect_error_count_level + chip->normal_connect_count_level)
+		|| chip->vooc_connect_error_count == MAX_VOOC_CONNECT_ERROR_COUNT_LEVEL)
+=======
 	if (chip->vooc_connect_error_count >
 		(chip->connect_error_count_level + chip->normal_connect_count_level)
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 		&& chip->retention_state
 		&& chip->cpa_current_type == CHG_PROTOCOL_VOOC) {
 		vote(chip->vooc_disable_votable, CONNECT_VOTER, true, 1, false);
@@ -4582,6 +4606,10 @@ static void oplus_vooc_retention_subs_callback(struct mms_subscribe *subs,
 				chip->normal_connect_count_level = 0;
 				chip->retention_fast_chg_status = 0;
 				chip->retention_state_ready = false;
+<<<<<<< HEAD
+				chip->connect_error_count_level = VOOC_CONNECT_ERROR_COUNT_LEVEL;
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 				vote(chip->vooc_disable_votable, CONNECT_VOTER, false, 0, false);
 			}
 			break;

@@ -333,7 +333,11 @@ static int oplus_quirks_notify_plugin(bool plugin)
 			count = quirks_diconnect_count();
 			info->plugout_jiffies = jiffies;
 			chip->keep_connect_jiffies = jiffies;
+<<<<<<< HEAD
+			cc_online = oplus_wired_get_hw_detect_recheck();
+=======
 			cc_online = oplus_wired_get_hw_detect();
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 			chg_debug("%d:count:%d, cc_online:%d", __LINE__, count, cc_online);
 			oplus_quirks_set_awake(chip, PLUGOUT_WAKEUP_TIMEOUT);
 			if (cc_online == CC_DETECT_PLUGIN) {

@@ -49,6 +49,10 @@
 #define OPLUS_FIXED_PDO_CURR_MA		3000
 #define OPLUS_FIXED_PDO_DEF_VOL		5000
 #define OPLUS_PPS_UW_MV_TRANSFORM	1000
+<<<<<<< HEAD
+#define PPS_GET_CP_VIN_DELAY		30
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 
 
 #define PPS_UPDATE_PDO_TIME		5
@@ -1558,7 +1562,11 @@ static void oplus_pps_switch_check_work(struct work_struct *work)
 		goto err;
 	}
 
+<<<<<<< HEAD
+	schedule_delayed_work(&chip->monitor_work, msecs_to_jiffies(PPS_GET_CP_VIN_DELAY));
+=======
 	schedule_delayed_work(&chip->monitor_work, 0);
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 
 	return;
 err:

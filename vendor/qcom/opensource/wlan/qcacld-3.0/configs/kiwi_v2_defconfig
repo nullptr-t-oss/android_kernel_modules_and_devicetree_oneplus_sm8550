@@ -93,3 +93,8 @@ CONFIG_IPA_WDI3_TX_TWO_PIPES := y
 endif # IPA_OFFLOAD
 
 endif # ARCH_SDXPINN
+<<<<<<< HEAD
+
+CONFIG_FEATURE_WLAN_CH_AVOID_EXT := y
+=======
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8

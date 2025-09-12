@@ -372,7 +372,11 @@ FF SMPowerModeSet (1)				//7.3.1.25
      }
 }
 
+<<<<<<< HEAD
+FF TSInfo (4)                             // 7.3.2.30
+=======
 FF TSInfo (3)                             // 7.3.2.30
+>>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 {
     {
         traffic_type:    1;
