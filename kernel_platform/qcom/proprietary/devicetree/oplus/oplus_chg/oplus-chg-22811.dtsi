@@ -221,14 +221,11 @@
 		track,voocphy_type = <1>;
 		track,wired_max_power = <100000>;
 		track,wired_fast_chg_scheme = <0>;
-<<<<<<< HEAD
 
 		track,gauge_status_ctrl;
 		track,nominal_qmax1 = <2480>;
 		track,nominal_fcc1 = <2300>;
 		track,external_gauge_num = <1>;
-=======
->>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 	};
 	usb_nop_phy: usb_nop_phy {
 		compatible = "usb-nop-xceiv";
@@ -362,11 +359,8 @@
 	qcom,warm_vfloat_over_sw_limit = <4140>;
 
 	qcom,smart_chg_soh_support;
-<<<<<<< HEAD
 	oplus_spec,dec-vol-fv-mv = <40>;
-=======
 	oplus,aging_ffc_version = <1>;
->>>>>>> ecee95deb8409381deef2efe6d43214060699de8
 
 	oplus,smooth_switch_v2;
 	oplus,reserve_chg_soc = <3>;
