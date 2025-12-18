@@ -26,7 +26,8 @@
 #if IS_ENABLED(CONFIG_ALLOC_ADJUST_FLAGS)
 #include <trace/hooks/iommu.h>
 #endif
-#if IS_ENABLED(CONFIG_ALLOC_ORDER_STAT) || IS_ENABLED(CONFIG_ALLOC_ADJUST_FLAGS)
+#if IS_ENABLED(CONFIG_ALLOC_ORDER_STAT) || IS_ENABLED(CONFIG_ALLOC_ADJUST_FLAGS) \
+	|| IS_ENABLED(CONFIG_COSTLY_ALLOC_MASK_RECLAIM)
 #include <trace/hooks/mm.h>
 #endif
 #if IS_ENABLED(CONFIG_KSWAPS_LOAD_STAT)
@@ -34,7 +35,8 @@
 #include <trace/events/vmscan.h>
 #endif
 
-#if IS_ENABLED(CONFIG_ALLOC_ADJUST_FLAGS) || IS_ENABLED(CONFIG_ALLOC_ORDER_STAT) || IS_ENABLED(CONFIG_KSWAPS_LOAD_STAT)
+#if IS_ENABLED(CONFIG_ALLOC_ADJUST_FLAGS) || IS_ENABLED(CONFIG_ALLOC_ORDER_STAT) \
+	|| IS_ENABLED(CONFIG_KSWAPS_LOAD_STAT) || IS_ENABLED(CONFIG_COSTLY_ALLOC_MASK_RECLAIM)
 #define KBUF_LEN 10
 static bool is_digit_str(const char *str)
 {
@@ -192,6 +194,132 @@ static void create_alloc_adjust_ctrl_proc(void)
 }
 
 static void remove_alloc_adjust_ctrl_proc(void)
+{
+}
+#endif
+
+#if IS_ENABLED(CONFIG_COSTLY_ALLOC_MASK_RECLAIM)
+DEFINE_STATIC_KEY_FALSE(costly_alloc_mask_reclaim);
+static bool g_mask_reclaim_enabled = false;
+static struct proc_dir_entry *mask_reclaim_entry;
+
+static int mask_reclaim_show(struct seq_file *m, void *v)
+{
+	if (g_mask_reclaim_enabled)
+		seq_printf(m, "1\n");
+	else
+		seq_printf(m, "0\n");
+
+	return 0;
+}
+
+static int mask_reclaim_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mask_reclaim_show, NULL);
+}
+
+static ssize_t mask_reclaim_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char kbuf[KBUF_LEN] = {0};
+	char *str;
+	int val;
+
+	if (count > KBUF_LEN - 1) {
+		pr_warn("input too long\n");
+		return -EINVAL;
+	}
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EINVAL;
+
+	kbuf[count] = 0;
+	str = strstrip(kbuf);
+	if (!str) {
+		pr_warn("input empty\n");
+		return -EINVAL;
+	}
+
+	if (!is_digit_str(str)) {
+		pr_warn("input invalid, not a digit string\n");
+		return -EINVAL;
+	}
+
+	if (kstrtoint(str, 0, &val)) {
+		pr_warn("not a valid number\n");
+		return -EINVAL;
+	}
+
+	g_mask_reclaim_enabled = !!val;
+	if (g_mask_reclaim_enabled)
+		static_branch_enable(&costly_alloc_mask_reclaim);
+	else
+		static_branch_disable(&costly_alloc_mask_reclaim);
+
+	return count;
+}
+
+static const struct proc_ops proc_mask_reclaim_ops = {
+	.proc_open = mask_reclaim_open,
+	.proc_read = seq_read,
+	.proc_write = mask_reclaim_write,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
+static void create_mask_reclaim_proc(void)
+{
+	mask_reclaim_entry = proc_create("oplus_mem/costly_alloc_mask_reclaim",
+			0660, NULL, &proc_mask_reclaim_ops);
+
+	if (!mask_reclaim_entry)
+		pr_err("costly_alloc_mask_reclaim_proc create failed, ENOMEM\n");
+}
+
+static void remove_mask_reclaim_proc(void)
+{
+	if (mask_reclaim_entry) {
+		proc_remove(mask_reclaim_entry);
+		mask_reclaim_entry = NULL;
+	}
+}
+
+static void mask_reclaim(void *data, gfp_t *alloc_gfp, unsigned int order)
+{
+	if (!static_branch_likely(&costly_alloc_mask_reclaim))
+		return;
+
+	if (likely(order < PAGE_ALLOC_COSTLY_ORDER))
+		return;
+	if (order == PAGE_ALLOC_COSTLY_ORDER)
+		*alloc_gfp &= ~__GFP_KSWAPD_RECLAIM;
+	else
+		*alloc_gfp &= ~__GFP_RECLAIM;
+}
+
+static int register_customize_alloc_gfp(void)
+{
+	return register_trace_android_vh_customize_alloc_gfp(mask_reclaim, NULL);
+}
+static void unregister_customize_alloc_gfp(void)
+{
+	unregister_trace_android_vh_customize_alloc_gfp(mask_reclaim, NULL);
+}
+#else
+static int register_customize_alloc_gfp(void)
+{
+	return 0;
+}
+
+static void unregister_customize_alloc_gfp(void)
+{
+}
+
+static void create_mask_reclaim_proc(void)
+{
+}
+
+static void remove_mask_reclaim_proc(void)
 {
 }
 #endif
@@ -609,9 +737,15 @@ static int __init kswapd_opt_init(void)
 	else
 		create_kswapd_debug_proc();
 
+	ret = register_customize_alloc_gfp();
+	if (ret)
+		pr_err("customize_alloc_gfp vendor_hook register failed: %d\n", ret);
+	else
+		create_mask_reclaim_proc();
+
 	ret = register_kswapd_load_stat();
 	if (ret)
-		pr_err("kswapd_load_stat vendor_hook regist failed: %d\n", ret);
+		pr_err("kswapd_load_stat vendor_hook register failed: %d\n", ret);
 	else
 		create_kswapd_load_stat_proc();
 	create_kswapd_nice_proc();
@@ -626,6 +760,8 @@ static void __exit kswapd_opt_exit(void)
 	unregister_kvmalloc_adjust_flags();
 	unregister_alloc_pages_slowpath();
 	remove_kswapd_debug_proc();
+	unregister_customize_alloc_gfp();
+	remove_mask_reclaim_proc();
 	unregister_kswapd_load_stat();
 	remove_kswapd_load_stat_proc();
 	remove_kswapd_nice_proc();

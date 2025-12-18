@@ -45,6 +45,7 @@ enum TYPEC_SWITCH_CHIP {
 	DIO_CHIP_4485 		= 0xF6,
 	HL_CHIP_5281 		= 0x50,
 	WAS_CHIP_4783		= 0x31,
+	BCT_CHIP_4482		= 0x9,
 	TYPEC_SWITCH_CHIP_MAX 	= 0xFF,
 };
 
@@ -54,6 +55,7 @@ enum typec_switch_vendor {
 	DIO4485,
 	HL5281,
 	WAS4783,
+	BCT4482,
 	DIO_MAX
 };
 int typec_switch_event(struct device_node *node,

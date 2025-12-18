@@ -2250,6 +2250,8 @@ static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 					      "fingerprint_underscreen_support");
 	ts->fingerprint_not_report_in_suspend = of_property_read_bool(np,
 					      "fingerprint_not_report_in_suspend");
+	ts->fingerprint_error_report_support = of_property_read_bool(np,
+					      "fingerprint_error_report_support");
 	ts->suspend_gesture_cfg   = of_property_read_bool(np, "suspend_gesture_cfg");
 	ts->auto_test_force_pass_support = of_property_read_bool(np,
 					   "auto_test_force_pass_support");

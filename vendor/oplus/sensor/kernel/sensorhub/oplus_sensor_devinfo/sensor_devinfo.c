@@ -138,6 +138,14 @@ static struct panel_node g_panel_node[PANEL_NUM] = {
 		.lcm_name = "csot_td4376b",
 	},
 	{
+		.id = P_D,
+		.lcm_name = "P_D",
+	},
+	{
+		.id = P_4,
+		.lcm_name = "P_4",
+	},
+	{
 		.id = PANEL_NUM,
 		.lcm_name = "panel_num",
 	}

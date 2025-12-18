@@ -63,6 +63,8 @@
 					OPLUS_IC_FUNC_BUCK_GET_BATT_BTB_TEMP
 					OPLUS_IC_FUNC_SET_TYPEC_MODE
 					OPLUS_IC_FUNC_GET_TYPEC_ROLE
+					OPLUS_IC_FUNC_BUCK_GET_USB_AICL_ENHANCE
+					OPLUS_IC_FUNC_BUCK_SET_AICL_POINT
 				>;
 				virqs = <
 					OPLUS_IC_VIRQ_ERR
@@ -224,6 +226,9 @@
 
 	oplus_chg_comm: oplus,comm {
 		compatible = "oplus,common-charge";
+		oplus_spec,dec_step = <20>;
+		oplus_spec,dec-vol-cc-full-thr = <0 400 600 800 1000 1200>;
+		oplus_spec,dec-vol-fv-full-mv = <0 20 20 40 40 40>;
 		oplus_spec,batt-them-thr = <(-100) 0 50 120 160 450 530>;
 		oplus_spec,iterm-ma = <144>;
 		oplus_spec,fv-mv = <4470 4470 4470 4470 4470 4470 4130 4130>;
@@ -285,6 +290,8 @@
 		oplus,smooth_switch;
 		oplus,reserve_chg_soc = <3>;
 		oplus,reserve_dis_soc = <3>;
+
+		oplus_spec,batt_full_time = <300>;
 	};
 
 	oplus_vooc: oplus,vooc {
@@ -363,6 +370,9 @@
 		oplus,gauge_ic = <&oplus_virtual_gauge>;
 		oplus,topic-update-interval = <5000>;
 		oplus,support_subboard_ntc;
+		oplus,fcl_support;
+		oplus,fcl_index = <0>;
+		oplus,vb_offset = <0>;
 
 		oplus_virtual_gauge: oplus,virtual_gauge {
 			compatible = "oplus,virtual_gauge";
@@ -413,6 +423,7 @@
 	pinctrl-2 = <&mcu_en_sleep>;
 
 	oplus,voocphy_bidirect_cp_support;
+	oplus,usb_aicl_enhance;
 	oplus,chg_ops = "plat-pmic";
 	oplus,otg_boost_src = <0>;//0:plat_pmic 1:external
 	oplus,batt_num = <2>;

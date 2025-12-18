@@ -139,7 +139,7 @@ void enqueue_locking_thread(struct rq *rq, struct task_struct *p)
 		return;
 
 	ots = get_oplus_task_struct(p);
-	orq = (struct oplus_rq *) rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 
 	if (IS_ERR_OR_NULL(ots) || !orq)
 		return;
@@ -180,7 +180,7 @@ void dequeue_locking_thread(struct rq *rq, struct task_struct *p)
 		return;
 
 	ots = get_oplus_task_struct(p);
-	orq = (struct oplus_rq *) rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 
 	if (IS_ERR_OR_NULL(ots) || !orq)
 		return;
@@ -241,7 +241,7 @@ void oplus_replace_locking_task_fair(struct rq *rq, struct task_struct **p,
 	if (!rq || !p || !se || locking_protect_disable)
 		return;
 
-	orq = (struct oplus_rq *)rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 	if (!orq_has_locking_tasks(orq))
 		return;
 	spin_lock_irqsave(orq->locking_list_lock, irqflag);

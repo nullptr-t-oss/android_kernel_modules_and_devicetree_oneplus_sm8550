@@ -14,3 +14,12 @@ config OPLUS_IPA_THERMAL
 	  default n
 	  help
 	    the driver of oplus virtual ipa sensor
+
+config OPLUS_THERMAL_VENDOR_HOOK
+	tristate "Oplus thermal vendor hook driver"
+	depends on THERMAL
+	help
+	   This is a placeholder driver for all thermal vendor hook register.
+	   It registers for thermal cooling device stats vendor hook and
+	   disables cooling stats for different thermal cooling devices
+	   selectively.

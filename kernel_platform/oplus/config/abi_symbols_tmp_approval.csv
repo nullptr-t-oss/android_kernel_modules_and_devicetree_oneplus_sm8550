@@ -1,4 +1,6 @@
 clk_set_duty_cycle
+__traceiter_android_vh_customize_alloc_gfp
+__tracepoint_android_vh_customize_alloc_gfp
 __tracepoint_android_vh_rwsem_direct_rsteal
 __tracepoint_android_vh_rwsem_optimistic_rspin
 osq_lock

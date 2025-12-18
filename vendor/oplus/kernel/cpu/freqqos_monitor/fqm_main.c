@@ -181,11 +181,12 @@ static void fqm_delayed_work_handler(struct work_struct *work)
 	}
 }
 
-static char callstack[4][64];
 
 bool is_from_pm_dev_qos(struct freq_qos_request *req)
 {
 	int i;
+	char callstack[4][64];
+	memset(callstack, 0, sizeof(callstack));
 
 	snprintf(callstack[0], sizeof(callstack[0]), "%ps", __builtin_return_address(0));
 	snprintf(callstack[1], sizeof(callstack[1]), "%ps", __builtin_return_address(1));

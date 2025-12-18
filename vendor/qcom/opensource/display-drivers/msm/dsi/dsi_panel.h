@@ -222,6 +222,8 @@ struct dsi_panel_oplus_privite {
 	bool set_backlight_not_do_esd_reg_read_enable;
 	bool dozedisable_esdcheck_delay;
 	bool doze_disable_esdcheck;
+	/* add for all wait te demand */
+	bool ddic_scaler_need_wait_te;
 };
 
 struct dsi_panel_oplus_serial_number {

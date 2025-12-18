@@ -694,6 +694,19 @@ static ssize_t oplus_display_regulator_control(struct kobject *obj,
 	return count;
 }
 
+static ssize_t oplus_display_get_main_panel_name(struct kobject *obj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct dsi_display *display = get_main_display();
+	if (!display || !display->panel || !display->panel->name) {
+		LCD_ERR("failed to config lcd panel name\n");
+		return -EINVAL;
+	}
+
+	LCD_INFO("panel name:%s\n", (char*)display->panel->name);
+	return sysfs_emit(buf, "panel_name:%s\n", (char*)display->panel->name);
+}
+
 static ssize_t oplus_display_get_panel_serial_number(struct kobject *obj,
 		struct kobj_attribute *attr, char *buf)
 {
@@ -3380,7 +3393,7 @@ static OPLUS_ATTR(shutdownflag, S_IRUGO | S_IWUSR, oplus_get_shutdownflag, oplus
 #ifdef OPLUS_TRACKPOINT_REPORT
 static OPLUS_ATTR(trackpoint_test, S_IRUGO | S_IWUSR, oplus_get_trackpoint_test_attr, oplus_set_trackpoint_test_attr);
 #endif /* OPLUS_TRACKPOINT_REPORT */
-
+static OPLUS_ATTR(main_panel_name, S_IRUGO | S_IWUSR, oplus_display_get_main_panel_name, NULL);
 /*
  * Create a group of attributes so that we can create and destroy them all
  * at once.
@@ -3448,6 +3461,7 @@ static struct attribute *oplus_display_attrs[] = {
 #ifdef OPLUS_TRACKPOINT_REPORT
 	&oplus_attr_trackpoint_test.attr,
 #endif /* OPLUS_TRACKPOINT_REPORT */
+	&oplus_attr_main_panel_name.attr,
 	NULL,	/* need to NULL terminate the list of attributes */
 };
 

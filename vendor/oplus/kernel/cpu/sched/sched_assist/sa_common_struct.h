@@ -85,6 +85,12 @@ struct oplus_task_struct {
 	int qos_recover_prio;
 	struct mutex qs_mutex;
 #endif
+/* #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL) */
+	u64 ddl;
+	u64 ddl_active_ts;
+	u64 runnable_ts;
+	struct rb_node ddl_node;
+/* #endif */
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_ABNORMAL_FLAG)
 	int abnormal_flag;
 #endif

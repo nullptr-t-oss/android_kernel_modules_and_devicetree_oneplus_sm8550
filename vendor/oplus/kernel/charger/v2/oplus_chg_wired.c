@@ -105,6 +105,7 @@ struct oplus_chg_wired {
 	struct oplus_mms *vooc_topic;
 	struct oplus_mms *cpa_topic;
 	struct oplus_mms *retention_topic;
+	struct oplus_mms *keep_topic;
 	struct mms_subscribe *retention_subs;
 	struct mms_subscribe *gauge_subs;
 	struct mms_subscribe *wired_subs;
@@ -1056,6 +1057,50 @@ static void oplus_common_power_check_recover_work(struct work_struct *work)
 	chg_info("oplus_common_power_check_recover_work need_common_power_check %d\n", chip->need_common_power_check);
 }
 
+static bool oplus_wired_pd_boost_check(struct oplus_chg_wired *chip)
+{
+	struct oplus_wired_spec_config *spec = &chip->spec;
+	int cool_down, cool_down_vol;
+
+	if ((chip->keep_topic == NULL) || !chip->cpa_support) {
+		if (is_pd_svooc_votable_available(chip) &&
+		    !!get_effective_result(chip->pd_svooc_votable) &&
+		    is_vooc_disable_votable_available(chip) &&
+		    !get_effective_result(chip->vooc_disable_votable)) {
+			chg_info("pd_svooc check, pd cannot be boosted\n");
+			oplus_pd_cpa_switch_end(chip);
+			return false;
+		}
+	}
+
+	if (chip->pd_boost_disable) {
+		chg_info("pd boost is disable\n");
+		return false;
+	}
+
+	if (chip->cool_down > 0) {
+		cool_down = chip->cool_down > spec->cool_down_pdqc_level_max ?
+				    spec->cool_down_pdqc_level_max :
+				    chip->cool_down;
+		if (chip->chg_ctrl_by_sale_mode) {
+			if (spec->cool_down_sale_pdqc_vol_mv == PDQC_SALE_MODE_ALLOW_BUCK_MV)
+				chip->pd_action = OPLUS_ACTION_BUCK;
+			cool_down_vol = spec->cool_down_sale_pdqc_vol_mv;
+		} else {
+			cool_down_vol = spec->cool_down_pdqc_vol_mv[cool_down - 1];
+		}
+	} else {
+		cool_down_vol = 0;
+	}
+
+	if (cool_down_vol > 0 && cool_down_vol < OPLUS_CHG_VBUS_9V) {
+		chg_info("cool down limit, pd cannot be boosted\n");
+		return false;
+	}
+
+	return true;
+}
+
 #define PD_RETRY_DELAY msecs_to_jiffies(1000)
 #define PD_RETRY_COUNT_MAX 3
 static void oplus_wired_pd_config_work(struct work_struct *work)
@@ -1063,7 +1108,6 @@ static void oplus_wired_pd_config_work(struct work_struct *work)
 	struct oplus_chg_wired *chip =
 		container_of(work, struct oplus_chg_wired, pd_config_work.work);
 	struct oplus_wired_spec_config *spec = &chip->spec;
-	int cool_down, cool_down_vol;
 	int vbus_set_mv = OPLUS_CHG_VBUS_5V; /* vbus default setting voltage is 5V */
 	bool vbus_changed = false;
 	int rc;
@@ -1090,44 +1134,14 @@ static void oplus_wired_pd_config_work(struct work_struct *work)
 		}
 	}
 
-	if (chip->cool_down > 0) {
-		cool_down = chip->cool_down > spec->cool_down_pdqc_level_max ?
-				    spec->cool_down_pdqc_level_max :
-				    chip->cool_down;
-		if (chip->chg_ctrl_by_sale_mode) {
-			if (spec->cool_down_sale_pdqc_vol_mv == PDQC_SALE_MODE_ALLOW_BUCK_MV)
-				chip->pd_action = OPLUS_ACTION_BUCK;
-			cool_down_vol = spec->cool_down_sale_pdqc_vol_mv;
-		} else {
-			cool_down_vol = spec->cool_down_pdqc_vol_mv[cool_down - 1];
-		}
-	} else {
-		cool_down_vol = 0;
-	}
-
 	chip->vbus_mv = oplus_wired_get_vbus();
 	switch (chip->pd_action) {
 	case OPLUS_ACTION_BOOST:
-		if (is_pd_svooc_votable_available(chip) &&
-		    !!get_effective_result(chip->pd_svooc_votable) &&
-		    is_vooc_disable_votable_available(chip) &&
-		    !get_effective_result(chip->vooc_disable_votable)) {
-			chg_info("pd_svooc check, pd cannot be boosted\n");
+		if (!oplus_wired_pd_boost_check(chip)) {
 			chip->pd_action = OPLUS_ACTION_NULL;
-			oplus_pd_cpa_switch_end(chip);
 			goto set_curr;
 		}
 
-		if (chip->pd_boost_disable) {
-			chg_info("pd boost is disable\n");
-			chip->pd_action = OPLUS_ACTION_NULL;
-			goto set_curr;
-		}
-		if (cool_down_vol > 0 && cool_down_vol < OPLUS_CHG_VBUS_9V) {
-			chg_info("cool down limit, pd cannot be boosted\n");
-			chip->pd_action = OPLUS_ACTION_NULL;
-			goto set_curr;
-		}
 		if (spec->vbatt_pdqc_to_9v_thr > 0 &&
 		    chip->vbat_mv < spec->vbatt_pdqc_to_9v_thr) {
 			chg_info("pd starts to boost, retry count %d, vbus_status %d.\n", chip->pd_retry_count, chip->vbus_status);
@@ -1584,6 +1598,7 @@ static void oplus_wired_plugin_work(struct work_struct *work)
 				false);
 	chip->chg_online = data.intval;
 	if (chip->chg_online) {
+		oplus_gauge_set_plugin_status();
 		oplus_common_power_check(chip);
 		chip->retention_state_ready = false;
 		oplus_wired_set_awake(chip, true);
@@ -1993,6 +2008,16 @@ static void oplus_wired_subscribe_retention_topic(struct oplus_mms *topic,
 	if (rc >= 0)
 		chip->pdqc_connect_error_count = data.intval;
 }
+
+#if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP)
+static void oplus_wired_subscribe_keep_topic(struct oplus_mms *topic,
+					     void *prv_data)
+{
+	struct oplus_chg_wired *chip = prv_data;
+
+	chip->keep_topic = topic;
+}
+#endif
 
 #define SALE_MODE_PDQC_DELAY msecs_to_jiffies(200)
 static void oplus_wired_sale_mode_buckboost_work(struct work_struct *work)
@@ -2931,6 +2956,9 @@ static int oplus_wired_probe(struct platform_device *pdev)
 	oplus_mms_wait_topic("vooc", oplus_wired_subscribe_vooc_topic, chip);
 	oplus_mms_wait_topic("cpa", oplus_wired_subscribe_cpa_topic, chip);
 	oplus_mms_wait_topic("retention", oplus_wired_subscribe_retention_topic, chip);
+#if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP)
+	oplus_mms_wait_topic("state_keep", oplus_wired_subscribe_keep_topic, chip);
+#endif
 
 #if IS_ENABLED(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER)
 	(void)oplus_wired_reg_debug_config(chip);

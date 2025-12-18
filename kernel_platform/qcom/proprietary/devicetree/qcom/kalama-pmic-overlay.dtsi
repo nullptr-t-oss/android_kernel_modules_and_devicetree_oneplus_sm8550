@@ -494,7 +494,7 @@
 			};
 
 			xo_config1: xo-config1 {
-				temperature = <80000>;
+				temperature = <100000>;
 				hysteresis = <10000>;
 				type = "passive";
 			};

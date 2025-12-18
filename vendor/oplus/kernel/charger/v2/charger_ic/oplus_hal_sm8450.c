@@ -4609,10 +4609,7 @@ static unsigned int oplus_update_batt_full_para(struct battery_chg_dev *bcdev)
 			charging_status = CHARGING_TYPE_UNKNOW;
 	}
 
-	if (charging_status < CHARGING_TYPE_MAX && temp_region < QBG_TEMP_MAX)
-		ibatt_full_cur = bcdev->batt_full_para[charging_status][temp_region];
-	else
-		goto exit;
+	ibatt_full_cur = bcdev->batt_full_para[charging_status][temp_region];
 
 	if (pre_ibatt_full_cur == ibatt_full_cur)
 		goto exit;

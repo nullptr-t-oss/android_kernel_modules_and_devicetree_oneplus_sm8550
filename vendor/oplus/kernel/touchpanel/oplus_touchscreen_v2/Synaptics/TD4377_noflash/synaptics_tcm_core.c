@@ -3098,6 +3098,16 @@ static int syna_tcm_set_aod_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 	int retval = 0;
 	unsigned short config;
 
+	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
+	if (!ts) {
+		TPD_INFO("Failed to get touchpanel data\n");
+		return -ENODEV;
+	}
+
+	if (ts->lpwg_fw_support) {
+		/*request lpwg firmware*/
+		syna_tcm_before_switch_to_gesture_mode(tcm_hcd, enable);
+	}
 
 	retval = syna_tcm_get_dynamic_config(tcm_hcd, DC_IN_WAKEUP_GESTURE_MODE, &config);
 	if (retval < 0) {
@@ -3384,7 +3394,7 @@ static int syna_mode_switch(void *chip_data, work_mode mode, int flag)
 				atomic_set(&tcm_hcd->host_downloading, 0);
 				/*syna_tcm_hdl_done(tcm_hcd);*/
 				enable_irq(tcm_hcd->s_client->irq);
-				g_tcm_hcd->hdl_finished_flag = 1;
+				/*g_tcm_hcd->hdl_finished_flag = 1;*/
 				complete(&tcm_hcd->config_complete);
 			}
 		}
@@ -5249,19 +5259,19 @@ static int syna_tcm_diaphragm_touch_lv_set(void *chip_data, int level)
 
 	switch (level) {
 	case DIAPHRAGM_DEFAULT_MODE:
-		regval = 0xfcff & regval;
+		regval = 0xfffc & regval;
 		break;
 	case DIAPHRAGM_FILM_MODE:
-		regval = 0xfcff & regval;
-		regval = 0x0100 | regval;
+		regval = 0xfffc & regval;
+		regval = 0x0001 | regval;
 		break;
 	case DIAPHRAGM_WATERPROO_MODE:
-		regval = 0xfcff & regval;
-		regval = 0x0200 | regval;
+		regval = 0xfffc & regval;
+		regval = 0x0002 | regval;
 		break;
 	case DIAPHRAGM_FILM_WATERPROO_MODE:
-		regval = 0xfcff & regval;
-		regval = 0x0200 | regval;
+		regval = 0xfffc & regval;
+		regval = 0x0003 | regval;
 		break;
 	default:
 		TPD_INFO("error, level = %d", level);
@@ -5331,13 +5341,23 @@ void tp_wait_hdl_finished(void)
 
 	syna_tcm_stop_reset_timer(tcm_hcd);
 
-	do {
-		if (retry_cnt) {
-			msleep(10);
-		}
-		retry_cnt++;
-		TPD_INFO("Wait hdl finished retry %d times...  ts->irq_state =%d \n", retry_cnt, ts->irq_state);
-	} while (!g_tcm_hcd->hdl_finished_flag && retry_cnt < 200 && ts->irq_state);
+	if(ts->tcm_skip_time) {
+		do {
+			if (retry_cnt) {
+				msleep(10);
+			}
+			retry_cnt++;
+			TPD_INFO("Wait hdl finished retry %d times...  ts->irq_state =%d \n", retry_cnt, ts->irq_state);
+		} while (!g_tcm_hcd->hdl_finished_flag && retry_cnt < 200 && ts->irq_state);
+	} else {
+		do {
+			if (retry_cnt) {
+				msleep(10);
+			}
+			retry_cnt++;
+			TPD_INFO("Wait hdl finished retry %d times...\n", retry_cnt);
+		} while (!g_tcm_hcd->hdl_finished_flag && retry_cnt < 200);
+	}
 }
 
 /*

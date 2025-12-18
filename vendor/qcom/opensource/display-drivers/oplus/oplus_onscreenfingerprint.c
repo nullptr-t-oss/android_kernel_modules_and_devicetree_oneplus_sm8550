@@ -2900,7 +2900,9 @@ int oplus_ofp_power_mode_handle(void *dsi_display, int power_mode)
 
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
 			oplus_adfr_aod_fod_te_source_vsync_switch(display, OPLUS_ADFR_TE_SOURCE_TE);
-			oplus_adfr_aod_fod_mux_vsync_switch(display->panel, true);
+			if (!oplus_ofp_full_screen_aod_mode_is_enabled()) {
+				oplus_adfr_aod_fod_mux_vsync_switch(display->panel, true);
+			}
 #endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 
 			refresh_rate = display->panel->cur_mode->timing.refresh_rate;

@@ -60,6 +60,9 @@ static void set_ux_to_task(struct task_struct *new) {
 
 static void android_rvh_wake_up_new_task_handler(void *unused, struct task_struct *new) {
 	set_ux_to_task(new);
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_GROUP_OPT)
+	oplus_sg_wake_up_new_task(new);
+#endif
 }
 
 static int register_scheduler_vendor_hooks(void)
@@ -102,8 +105,9 @@ static int register_scheduler_vendor_hooks(void)
 #endif
 
 #if IS_ENABLED(CONFIG_OPLUS_SCHED_GROUP_OPT)
-	REGISTER_TRACE_RVH(android_rvh_cpu_cgroup_online, android_rvh_cpu_cgroup_online_handler);
+	REGISTER_TRACE_VH(android_vh_reweight_entity, android_vh_reweight_entity_handler);
 #endif
+	REGISTER_TRACE_RVH(android_rvh_set_cpus_allowed_comm, android_rvh_set_cpus_allowed_comm_handler);
 	/* register vender hook in fs/exec.c */
 	REGISTER_TRACE_VH(task_rename, task_rename_handler);
 
@@ -131,10 +135,6 @@ static int register_scheduler_vendor_hooks(void)
 
 	return 0;
 }
-
-#define OPLUS_OEM_DATA_SIZE_TEST(ostruct, kstruct)		\
-	BUILD_BUG_ON(sizeof(ostruct) > (sizeof(u64) *		\
-		ARRAY_SIZE(((kstruct *)0)->android_oem_data1)))
 
 typedef unsigned long (*profile_event_register_t)(enum profile_type type,
 		struct notifier_block *n);
@@ -176,18 +176,12 @@ static int __init oplus_sched_assist_init(void)
 {
 	int ret;
 
-	/* compile time checks for vendor data size */
-	OPLUS_OEM_DATA_SIZE_TEST(struct oplus_rq, struct rq);
-
 	ret = sa_oemdata_init();
 	if (ret != 0)
 		return ret;
 
 	sched_assist_init_oplus_rq();
 	update_ux_sched_cputopo();
-#if IS_ENABLED(CONFIG_OPLUS_SCHED_GROUP_OPT)
-	oplus_sg_map_init();
-#endif
 
 	ret = register_scheduler_vendor_hooks();
 	if (ret != 0)

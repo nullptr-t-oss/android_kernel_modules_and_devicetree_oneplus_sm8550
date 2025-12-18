@@ -31,6 +31,7 @@
 #include <linux/msm_drm_notify.h>
 #include <linux/notifier.h>
 #include "../oplus/oplus_display_private_api.h"
+#include "../oplus/oplus_display_panel_common.h"
 #include "../oplus/oplus_display_panel.h"
 #include "../oplus/oplus_display_interface.h"
 #include <soc/oplus/system/oplus_project.h>
@@ -9320,6 +9321,18 @@ int dsi_display_enable(struct dsi_display *display)
 	if ((mode->priv_info->dsc_enabled ||
 			mode->priv_info->vdc_enabled) &&
 		!(mode->dsi_mode_flags & DSI_MODE_FLAG_DMS_FPS)) {
+#ifdef OPLUS_FEATURE_DISPLAY
+		/* PPS & timming swicth wait te send */
+		if (display->panel->oplus_priv.ddic_scaler_need_wait_te) {
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+			DSI_INFO("dsi_mode_flags = %d\n", mode->dsi_mode_flags);
+			/* adfr-pre-switch wait te send */
+			oplus_adfr_pre_switch_send(display->panel);
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+			oplus_wait_for_vsync(display->panel);
+			usleep_range(1000, 1000+100);
+		}
+#endif /* OPLUS_FEATURE_DISPLAY */
 		rc = dsi_panel_update_pps(display->panel);
 		if (rc) {
 			DSI_ERR("[%s] panel pps cmd update failed, rc=%d\n",

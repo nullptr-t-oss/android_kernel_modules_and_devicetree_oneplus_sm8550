@@ -986,7 +986,8 @@ struct touchpanel_data {
 	bool game_switch_support;                           /*indicate game switch support or not*/
 	bool face_detect_support;                           /*touch porximity function*/
 	bool fingerprint_underscreen_support;               /*fingerprint underscreen support*/
-	bool fingerprint_not_report_in_suspend;
+	bool fingerprint_not_report_in_suspend;             /*fingerprint not report in suspending*/
+	bool fingerprint_error_report_support;              /*fingerprint error report support*/
 	bool sec_long_low_trigger;                          /*samsung s6d7ate ic int feature*/
 	bool suspend_gesture_cfg;
 	bool auto_test_force_pass_support;                  /*auto test force pass in early project*/
@@ -1385,6 +1386,7 @@ struct oplus_touchpanel_operations {
 
 	void (*freq_hop_trigger)(void *chip_data); /*trigger frequency-hopping*/
 	void (*force_water_mode)(void *chip_data, bool enable); /*force enter water mode*/
+	void (*set_fp_error_report)(void *chip_data, bool enable); /*set fp error report*/
 	void (*inject_wdt_reset)(void *chip_data, int value); /*inject watchdog reset*/
 	void (*get_water_mode)(void *chip_data); /*force enter water mode*/
 	void (*get_glove_mode)(void *chip_data, int *enable); /*get glove mode parameters*/

@@ -90,7 +90,22 @@ static int tp_irq_check(struct touchpanel_data *ts)
 	return 1;
 }
 
+static void tp_set_fp_error_report(struct touchpanel_data *ts, unsigned int debug_level)
+{
+	if (!ts) {
+		TPD_INFO("%s: ts is NULL\n", __func__);
+		return;
+	}
 
+	if (!ts->ts_ops || !ts->ts_ops->set_fp_error_report) {
+		TS_TP_INFO("%s: ts->ts_ops or ts->ts_ops->set_fp_error_report is NULL\n", __func__);
+		return;
+	}
+
+	TP_INFO(ts->tp_index, "%s: set_fp_error_report value=%d\n", __func__, debug_level);
+
+	ts->ts_ops->set_fp_error_report(ts->chip_data, (debug_level > LEVEL_BASIC) ? 1 : 0);
+}
 
 /*******Part3:Function node Function  Area********************/
 /*oplus_optimized_time - For optimized time*/
@@ -541,20 +556,15 @@ static ssize_t proc_debug_level_read(struct file *file, char __user *buffer,
 static ssize_t proc_debug_level_write(struct file *file,
 				      const char __user *buffer, size_t count, loff_t *ppos)
 {
-#ifdef CONFIG_OPLUS_TP_APK
-	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
-#endif /* end of CONFIG_OPLUS_TP_APK*/
 
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
 	int tmp = 0;
 	char buf[4] = {0};
 
-#ifdef CONFIG_OPLUS_TP_APK
-
 	if (!ts) {
+		TPD_INFO("%s: ts is NULL\n", __func__);
 		return count;
 	}
-
-#endif /* end of CONFIG_OPLUS_TP_APK*/
 
 	tp_copy_from_user(buf, sizeof(buf), buffer, count, 2);
 
@@ -565,6 +575,13 @@ static ssize_t proc_debug_level_write(struct file *file,
 
 	tp_debug = tmp;
 	touch_misc_state_change(PDE_DATA(file_inode(file)), IOC_STATE_DEBUG_LEVEL, tp_debug);
+
+	mutex_lock(&ts->mutex);
+	if (ts->fingerprint_error_report_support) {
+		tp_set_fp_error_report(ts, tp_debug);
+	}
+	mutex_unlock(&ts->mutex);
+
 #ifdef CONFIG_OPLUS_TP_APK
 
 	if (ts && ts->apk_op && ts->apk_op->apk_debug_set) {
@@ -1254,6 +1271,7 @@ static ssize_t proc_hardware_control_write(struct file *file,
 	int value = 0;
 	char buf[4] = {0};
 	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+	int ret = 0;
 
 	if (!ts) {
 		return count;
@@ -1267,22 +1285,34 @@ static ssize_t proc_hardware_control_write(struct file *file,
 	}
 
 	if (value == ENABLE_HW_RES_AVDD) {
-		tp_powercontrol_avdd(&ts->hw_res, true);
+		ret = tp_powercontrol_avdd(&ts->hw_res, true);
+		if (ret) {
+			TP_INFO(ts->tp_index, "%s: tp_powercontrol_avdd error\n", __func__);
+		}
 		return count;
 	}
 
 	if (value == DISABLE_HW_RES_AVDD) {
-		tp_powercontrol_avdd(&ts->hw_res, false);
+		ret = tp_powercontrol_avdd(&ts->hw_res, false);
+		if (ret) {
+			TP_INFO(ts->tp_index, "%s: tp_powercontrol_avdd error\n", __func__);
+		}
 		return count;
 	}
 
 	if (value == ENABLE_HW_RES_VDDI) {
-		tp_powercontrol_vddi(&ts->hw_res, true);
+		ret = tp_powercontrol_vddi(&ts->hw_res, true);
+		if (ret) {
+			TP_INFO(ts->tp_index, "%s: tp_powercontrol_vddi error\n", __func__);
+		}
 		return count;
 	}
 
 	if (value == DISABLE_HW_RES_VDDI) {
-		tp_powercontrol_vddi(&ts->hw_res, false);
+		ret = tp_powercontrol_vddi(&ts->hw_res, false);
+		if (ret) {
+			TP_INFO(ts->tp_index, "%s: tp_powercontrol_vddi error\n", __func__);
+		}
 		return count;
 	}
 

@@ -252,8 +252,11 @@ static void ilitek_get_rawdata(void)
 	int ych = ilits->ych_num;
 	u8 *buf = ilits->tr_buf;
 	int offset_len = 0;
-
-
+	int index = 0;
+	char rawdata_log[DIFF_LEN] = {0};
+	u8 *data_p = NULL;
+	int start = 0;
+	int end = 0;
 	if (ilits->position_high_resolution == OFF) {
 		offset_len = 35;
 	} else {
@@ -264,42 +267,47 @@ static void ilitek_get_rawdata(void)
 		offset_len += 10;
 	}
 
+	data_p = &buf[offset_len];
 	for (i = 0; i < ych; i++) {
-		ILI_INFO("[%2d]", i);
-
 		for (j = 0; j < xch; j++) {
 			s16 temp;
-			temp = (s16)((buf[(i * xch + j) * 2 + offset_len] << 8)
-				+ buf[(i * xch + j) * 2 + offset_len + 1]);
-			pr_cont("%5d,", temp);
+			temp = (s16)((data_p[0] << 8) + data_p[1]);
+			data_p += 2;
+			index = strlen(rawdata_log);
+			snprintf(rawdata_log + index, sizeof(rawdata_log) - index, "%5d,", temp);
 		}
-
-		ILI_INFO("\n");
+		ILI_INFO("[%2d] %s\n", i, rawdata_log);
+		memset(rawdata_log, 0, sizeof(rawdata_log));
 	}
 
-	ILI_INFO("Y Data:");
-	for (i = 2 * xch * ych + offset_len; i < 2 * xch * ych + 2 * ych + offset_len; i += 2) {
+	start = 2 * xch * ych + offset_len;
+	end = 2 * xch * ych + 2 * ych + offset_len;
+	for (i = start; i < end; i += 2) {
 		s16 temp;
 		temp = (s16)((buf[i] << 8) + buf[i + 1]);
-		pr_cont("%5d,", temp);
+		index = strlen(rawdata_log);
+		snprintf(rawdata_log + index, sizeof(rawdata_log) - index, "%5d,", temp);
 	}
-	ILI_INFO("\n");
+	ILI_INFO("Y Data: %s\n", rawdata_log);
+	memset(rawdata_log, 0, sizeof(rawdata_log));
 
-	ILI_INFO("X Data:");
-	for (i = 2 * xch * ych + 2 * ych + offset_len; i < 2 * xch * ych + 2 * ych + 2 * xch + offset_len; i += 2) {
+	start = 2 * xch * ych + 2 * ych + offset_len;
+	end = 2 * xch * ych + 2 * ych + 2 * xch + offset_len;
+	for (i = start; i < end; i += 2) {
 		s16 temp;
 		temp = (s16)((buf[i] << 8) + buf[i + 1]);
-		pr_cont("%5d,", temp);
+		index = strlen(rawdata_log);
+		snprintf(rawdata_log + index, sizeof(rawdata_log) - index, "%5d,", temp);
 	}
-	ILI_INFO("\n");
+	ILI_INFO("X Data: %s\n", rawdata_log);
+	memset(rawdata_log, 0, sizeof(rawdata_log));
 
-	ILI_INFO("self key and other Data:");
-	for (i = 2 * xch * ych + 2 * ych + 2 * xch + offset_len; i < ilits->tp_data_len - 1; i += 2) {
-		s16 temp;
-		temp = (s16)((buf[i] << 8) + buf[i + 1]);
-		pr_cont("%5d,", temp);
+	start = 2 * xch * ych + 2 * ych + 2 * xch + offset_len;
+	for (i = start; i < ilits->tp_data_len - 1; i++) {
+		index = strlen(rawdata_log);
+		snprintf(rawdata_log + index, sizeof(rawdata_log) - index, "%2x, ", buf[i]);
 	}
-	ILI_INFO("\n");
+	ILI_INFO("self key and other Data: %s\n", rawdata_log);
 }
 
 static int ili_spi_mp_pre_cmd(u8 cdc)
@@ -510,6 +518,8 @@ void ili_dump_data(void *data, int type, int len, int row_len,
 	u8 *p8 = NULL;
 	s32 *p32 = NULL;
 	s16 *p16 = NULL;
+	char dump_data_log[ILI_DUMP_DATE_LEN] = {0};
+	int index = 0;
 
 	if (!ili_debug_en && !ilits->differ_mode) {
 		return;
@@ -524,9 +534,7 @@ void ili_dump_data(void *data, int type, int len, int row_len,
 		return;
 	}
 
-	pr_cont("\n\n");
-	pr_cont("ILITEK: Dump %s data\n", name);
-	pr_cont("ILITEK: ");
+	snprintf(dump_data_log, sizeof(dump_data_log), "\n\nILITEK: Dump %s data\nILITEK: ", name);
 
 	if (type == 8) {
 		p8 = (u8 *) data;
@@ -541,26 +549,27 @@ void ili_dump_data(void *data, int type, int len, int row_len,
 	}
 
 	for (i = 0; i < len; i++) {
+		index = strlen(dump_data_log);
 		if (type == 8) {
-			pr_cont(" %4x ", p8[i]);
+			snprintf(dump_data_log + index, sizeof(dump_data_log) - index, " %4x ", p8[i]);
 
 		} else if (type == 32) {
-			pr_cont(" %4x ", p32[i]);
+			snprintf(dump_data_log + index, sizeof(dump_data_log) - index, " %4x ", p32[i]);
 
 		} else if (type == 10) {
-			pr_cont(" %4d ", p32[i]);
+			snprintf(dump_data_log + index, sizeof(dump_data_log) - index, " %4d ", p32[i]);
 
 		} else if (type == 16) {
-			pr_cont(" %4d ", p16[i]);
+			snprintf(dump_data_log + index, sizeof(dump_data_log) - index, " %4d ", p16[i]);
 		}
 
 		if ((i % row) == row - 1) {
-			pr_cont("\n");
-			pr_cont("ILITEK: ");
+			pr_cont("ILITEK: %s \n", dump_data_log);
+			memset(dump_data_log, 0, sizeof(dump_data_log));
 		}
 	}
 
-	pr_cont("\n\n");
+	pr_cont("ILITEK: %s\n\n", dump_data_log);
 }
 
 int ili_move_mp_code_iram(void)
@@ -1457,9 +1466,20 @@ void ili_report_ap_mode(u8 *buf, int len)
 		ILI_DBG("original x = %d, y = %d p = %d\n", xop, yop, touch_major);
 	}
 
-	ilits->glove_mode = buf[ilits->tp_data_len - 6] & 0x01;
-	ilits->water_flag = (buf[ilits->tp_data_len - 6] & 0x02) >> 1;
-	ilits->thr = (s16)((buf[ilits->tp_data_len - 5] << 8) | buf[ilits->tp_data_len - 4]);
+	if (ilits->chip->support_driver_ver > DRIVER_VER_2080) {
+		ilits->normal_mode = buf[ilits->tp_data_len - ILI_MODE_BYTE] & 0x01;
+		ilits->glove_mode = (buf[ilits->tp_data_len - ILI_MODE_BYTE] & 0x04) >> 2;
+		ilits->water_flag = (buf[ilits->tp_data_len - ILI_WATER_FLAG_BYTE] & 0x10) >> 4;
+		ilits->max_diff = (s16)((buf[ilits->tp_data_len - ILI_MAX_DIFF_H8] << 8) | buf[ilits->tp_data_len - ILI_MAX_DIFF_L8]);
+		ilits->thr = (s16)((buf[ilits->tp_data_len - ILI_THR_H8] << 8) | buf[ilits->tp_data_len - ILI_THR_L8]);
+		ilits->thr_td = (s16)((buf[ilits->tp_data_len - ILI_THR_TD_H8] << 8) | buf[ilits->tp_data_len - ILI_THR_TD_L8]);
+		TPD_SPECIFIC_PRINT(ilits->print_count, "normal_mode = %d, glove_mode = %d, water_flag = %d, max_diff = %d, thr = %d, thr_td = %d\n",
+			ilits->normal_mode, ilits->glove_mode, ilits->water_flag, ilits->max_diff, ilits->thr, ilits->thr_td);
+	} else {
+		ilits->glove_mode = buf[ilits->tp_data_len - ILI_V2080_WATER_FLAG] & 0x01;
+		ilits->water_flag = (buf[ilits->tp_data_len - ILI_V2080_WATER_FLAG] & 0x02) >> 1;
+		ilits->thr = (s16)((buf[ilits->tp_data_len - ILI_V2080_THR_H8] << 8) | buf[ilits->tp_data_len - ILI_V2080_THR_L8]);
+	}
 
 	if (ilits->ts->health_monitor_support) {
 		if (ilits->glove_mode_flag == 0 && ilits->glove_mode == 1) {
@@ -1476,8 +1496,15 @@ void ili_report_ap_mode(u8 *buf, int len)
 		ilits->glove_mode_flag = ilits->glove_mode;
 	}
 
-	ILI_DBG("glove_mode = %d, water_flag = %d, thr = %d\n", ilits->glove_mode, ilits->water_flag, ilits->thr);
 	ilitek_tddi_touch_send_debug_data(buf, len);
+	if (ilits->chip->support_driver_ver > DRIVER_VER_2080 && ilits->position_high_resolution == ON) {
+		if (((buf[len - ILI_THR_BASELIE_BTYE]&0x04) >> 2) == 1) {
+			if (ili_set_tp_data_len(DATA_FORMAT_DEBUG, false, NULL) < 0) {
+				ILI_ERR("Failed to switch debug mode\n");
+			}
+			ilits->switch_for_report = true;
+		}
+	}
 }
 
 void ili_debug_mode_report_point(u8 *buf, int len)
@@ -1576,14 +1603,31 @@ void ili_debug_mode_report_point(u8 *buf, int len)
 			ILI_DBG("original x = %d, y = %d p = %d\n", xop, yop, p[i]);
 		}
 	}
+	if ((ilits->chip->support_driver_ver > DRIVER_VER_2080) && ilits->switch_for_report) {
+		ilitek_get_rawdata();
+		if (ili_set_tp_data_len(DATA_FORMAT_DEMO, false, NULL) < 0) {
+			ILI_ERR("Failed to switch demo mode\n");
+		}
+	}
 }
 
 void ili_report_debug_mode(u8 *buf, int len)
 {
-	ilits->glove_mode = buf[ilits->tp_data_len - 6] & 0x01;
-	ilits->water_flag = (buf[ilits->tp_data_len - 6] & 0x02) >> 1;
-	ilits->thr = (s16)((buf[ilits->tp_data_len - 5] << 8) | buf[ilits->tp_data_len - 4]);
-	ILI_DBG("glove_mode = %d, water_flag = %d, thr = %d\n", ilits->glove_mode, ilits->water_flag, ilits->thr);
+	if (ilits->chip->support_driver_ver > DRIVER_VER_2080) {
+		ilits->normal_mode = buf[ilits->tp_data_len - ILI_MODE_BYTE] & 0x01;
+		ilits->glove_mode = (buf[ilits->tp_data_len - ILI_MODE_BYTE] & 0x04) >> 2;
+		ilits->water_flag = (buf[ilits->tp_data_len - ILI_WATER_FLAG_BYTE] & 0x10) >> 4;
+		ilits->max_diff = (s16)((buf[ilits->tp_data_len - ILI_MAX_DIFF_H8] << 8) | buf[ilits->tp_data_len - ILI_MAX_DIFF_L8]);
+		ilits->thr = (s16)((buf[ilits->tp_data_len - ILI_THR_H8] << 8) | buf[ilits->tp_data_len - ILI_THR_L8]);
+		ilits->thr_td = (s16)((buf[ilits->tp_data_len - ILI_THR_TD_H8] << 8) | buf[ilits->tp_data_len - ILI_THR_TD_L8]);
+		ILI_DBG("normal_mode = %d, glove_mode = %d, water_flag = %d, max_diff = %d, thr = %d, thr_td = %d\n",
+			ilits->normal_mode, ilits->glove_mode, ilits->water_flag, ilits->max_diff, ilits->thr, ilits->thr_td);
+	} else {
+		ilits->glove_mode = buf[ilits->tp_data_len - ILI_V2080_WATER_FLAG] & 0x01;
+		ilits->water_flag = (buf[ilits->tp_data_len - ILI_V2080_WATER_FLAG] & 0x02) >> 1;
+		ilits->thr = (s16)((buf[ilits->tp_data_len - ILI_V2080_THR_H8] << 8) | buf[ilits->tp_data_len - ILI_V2080_THR_L8]);
+		ILI_DBG("glove_mode = %d, water_flag = %d, thr = %d\n", ilits->glove_mode, ilits->water_flag, ilits->thr);
+	}
 	ili_debug_mode_report_point(buf + 5, len);
 	ilitek_tddi_touch_send_debug_data(buf, len);
 }
@@ -2274,6 +2318,7 @@ int ili_set_tp_data_len(int format, bool send, u8 *data)
 	u8 cmd[10] = {0}, ctrl = 0, debug_ctrl = 0;
 	u16 self_key = 2;
 	int ret = 0, tp_mode = ilits->actual_tp_mode, len = 0, geture_info_length = 0, demo_mode_packet_len = 0;
+	ilits->switch_for_report = false;
 
 	if (ilits->position_high_resolution == OFF) {
 		geture_info_length = P5_X_GESTURE_INFO_LENGTH;
@@ -3458,6 +3503,10 @@ static void ilitek_rate_white_list_ctrl(void *chip_data, int value)
 		cmd[3] = 0x78;
 		ILI_INFO("report rate 120 hz\n");
 		break;
+	case 144: /* 144Hz */
+		cmd[3] = 0x90;
+		ILI_INFO("report rate 144 hz\n");
+		break;
 	case 180: /* 180Hz */
 		cmd[3] = 0xB4;
 		ILI_INFO("report rate 180 hz\n");
@@ -3664,6 +3713,34 @@ static void ilitek_aiunit_game_info(void *chip_data)
 	mutex_unlock(&chip_info->touch_mutex);
 }
 
+static void ilitek_edge_limit_switch_write(void *chip_data, int value)
+{
+	struct ilitek_ts_data *chip_info = (struct ilitek_ts_data *)chip_data;
+	uint8_t cmd[3] = {0x01, 0x12, 0x03};
+	int retval = 0;
+
+	if (chip_info->ts->is_suspended) {
+		return;
+	}
+	if((value < 0) || value > 1) {
+		TPD_INFO("%s: fts_edge_limit_switch_write value error\n", __func__);
+		return;
+	}
+	if (value == 0) {
+		mutex_lock(&chip_info->touch_mutex);
+		retval = ilits->wrapper(cmd, sizeof(cmd), NULL, 0, OFF, OFF);
+		if (retval < 0) {
+			ILI_ERR(" send cmd fail\n");
+		}
+		else {
+			ILI_INFO("disable fw edge limit success !\n");
+		}
+		mutex_unlock(&chip_info->touch_mutex);
+	} else {
+		ILI_INFO("fw edge limit default enabled\n");
+	}
+}
+
 static struct oplus_touchpanel_operations ilitek_ops = {
 	.ftm_process                = ilitek_ftm_process,
 	.ftm_process_extra          = ilitek_ftm_process_extra,
@@ -3685,6 +3762,7 @@ static struct oplus_touchpanel_operations ilitek_ops = {
 	.tp_queue_work_prepare      = ilitek_reset_queue_work_prepare,
 	.tp_irq_throw_away          = ilitek_irq_throw_away,
 	.rate_white_list_ctrl   	= ilitek_rate_white_list_ctrl,
+	.edge_limit_switch_write    = ilitek_edge_limit_switch_write,
 	.diaphragm_touch_lv_set     = ilitek_diaphragm_touch_lv_set,
 	.get_water_mode             = ilitek_read_water_flag,
 	.force_water_mode           = ilitek_force_water_mode,
@@ -3843,10 +3921,8 @@ static int ilitek_read_debug_data(struct seq_file *s,
 		seq_printf(s, "\n");
 
 		seq_printf(s, "self key and other Data:");
-		for (i = 2 * xch * ych + 2 * ych + 2 * xch + offset_len; i < ilits->tp_data_len - 1; i += 2) {
-			s16 temp;
-			temp = (s16)((buf[i] << 8) + buf[i + 1]);
-			seq_printf(s, "%5d,", temp);
+		for (i = 2 * xch * ych + 2 * ych + 2 * xch + offset_len; i < ilits->tp_data_len - 1; i++) {
+			seq_printf(s, "%2x,", buf[i]);
 		}
 		seq_printf(s, "\n");
 

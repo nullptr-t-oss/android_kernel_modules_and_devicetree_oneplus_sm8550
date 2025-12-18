@@ -2213,7 +2213,7 @@ int oplus_adfr_pre_switch_send(void *dsi_panel)
 
 	OPLUS_ADFR_TRACE_BEGIN("oplus_adfr_pre_switch_send");
 
-	if (panel->cur_mode->timing.refresh_rate == 60) {
+	if (panel->cur_mode->timing.refresh_rate == 60 || panel->cur_mode->timing.refresh_rate == 90) {
 		ADFR_DEBUG("start to delay to second half frame in 60hz timing\n");
 		oplus_need_to_sync_te(panel);
 	}

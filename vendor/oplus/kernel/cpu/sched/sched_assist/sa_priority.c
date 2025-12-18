@@ -10,6 +10,10 @@
 #include "sa_common.h"
 #include "sa_priority.h"
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+#include "sa_ddl.h"
+#endif
+
 /*
  * Nice levels are multiplicative, with a gentle 10% change for every
  * nice level changed. I.e. when a CPU-bound task goes from nice 0 to
@@ -511,7 +515,7 @@ void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *tas
 	unsigned long irqflag;
 
 	rq = task_rq(task);
-	orq = (struct oplus_rq *)rq->android_oem_data1;
+	orq = get_oplus_rq(rq);
 	ots = get_oplus_task_struct(task);
 	if (IS_ERR_OR_NULL(ots)) {
 		return;
@@ -536,6 +540,15 @@ void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *tas
 		}
 	}
 	spin_unlock_irqrestore(orq->ux_list_lock, irqflag);
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+	/* Ensure the calling here after the oplus_task_ddl_tint */
+	if (!READ_ONCE(task->on_cpu))
+		return;
+
+	if (ots->ddl_active_ts && !oplus_ddl_within_limit(rq, task))
+		resched_curr(rq);
+#endif
 }
 
 inline void save_task_vruntime_delta(struct task_struct *task, struct oplus_task_struct *ots)

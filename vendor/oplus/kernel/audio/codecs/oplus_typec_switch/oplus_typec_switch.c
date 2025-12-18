@@ -195,6 +195,20 @@ static const struct typec_switch_reg_val dio4485_i2c_reg[] = {
 	//*/
 };
 
+static const struct typec_switch_reg_val bct4482_i2c_reg[] = {
+	{DEFAULT_REG_SLOW_L, 0x00},
+	{DEFAULT_REG_SLOW_R, 0x00},
+	{DEFAULT_REG_SLOW_MIC, 0x00},
+	{DEFAULT_REG_SLOW_SENSE, 0x00},
+	{DEFAULT_REG_SLOW_GND, 0x00},
+	{DEFAULT_REG_DELAY_L_R, 0x00},
+	{DEFAULT_REG_DELAY_L_MIC, 0x00},
+	{DEFAULT_REG_DELAY_L_SENSE, 0x00},
+	{DEFAULT_REG_DELAY_L_AGND, 0x09},
+	{DEFAULT_REG_SWITCH_SETTINGS, 0x98},
+	{DEFAULT_REG_SWITCH_SELECT, 0x18},
+};
+
 static const struct typec_switch_reg_val default_i2c_reg[] = {
 	{DEFAULT_REG_SWITCH_SELECT, 0x18},
 	{DEFAULT_REG_SLOW_L, 0x00},
@@ -305,6 +319,11 @@ static void typec_switch_usbc_update_settings(struct typec_switch_priv *switch_p
 	if (switch_priv->vendor == WAS4783) {
 		return;
 	}
+
+	if (switch_priv->vendor == BCT4482) {
+		return;
+	}
+
 
 	reg_val = 0;
 	SET_BIT(reg_val, DEFAULT_SWITCH_SETTINGS_DEVICE_ENABLE);
@@ -883,6 +902,33 @@ static int typec_switch_usbc_analog_setup_switches(struct typec_switch_priv *swi
 
 			dev_info(dev, "%s, %d, set reg[0x%02x] done.\n", __func__, __LINE__, DEFAULT_REG_FUN_EN);
 			typec_switch_status = 0;
+		} else if (switch_priv->vendor == BCT4482) {
+			reg_val = 0x00;
+			dev_info(dev, "%s, %d, write 0x%02x = 0x%02x", __func__, __LINE__, DEFAULT_REG_SWITCH_SELECT, reg_val);
+			ret = typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SELECT, reg_val);
+
+			reg_val = 0x9F;
+			dev_info(dev, "%s, %d, write 0x%02x = 0x%02x", __func__, __LINE__, DEFAULT_REG_SWITCH_SETTINGS, reg_val);
+			ret = typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SETTINGS, reg_val);
+
+			reg_val = 0x09;
+			dev_info(dev, "%s, %d, write 0x%02x = 0x%02x", __func__, __LINE__, DEFAULT_REG_FUN_EN, reg_val);
+			ret = typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_FUN_EN, reg_val);
+
+			for (i = 0;i < 100 ;i++) {
+				usleep_range(10*1000, 10*1005);
+				regmap_read(switch_priv->regmap, DEFAULT_REG_DETECTION_FLAG, &reg_val);
+				dev_info(dev, "%s, %d, i = %d, reg_val = 0x%02x", __func__, __LINE__, i, reg_val);
+				if (GET_BIT(reg_val, DEFAULT_DETECTION_FLAG_AUDIO_JACK_DETECTION_CONFIGURATION_OCCURRED)) {
+					dev_info(dev, "%s: Audio jack detection and configuration has occurred.\n", __func__);
+
+					break;
+				}
+			}
+
+			dev_info(dev, "%s, %d, set reg[0x%02x] done.\n", __func__, __LINE__, DEFAULT_REG_FUN_EN);
+			typec_switch_status = 0;
+
 		} else {
 			reg_val = 0x9F;
 			dev_info(dev, "%s, %d, write 0x%02x = 0x%02x", __func__, __LINE__, DEFAULT_REG_SWITCH_SETTINGS, reg_val);
@@ -904,9 +950,10 @@ static int typec_switch_usbc_analog_setup_switches(struct typec_switch_priv *swi
 		dev_info(dev, "%s, %d, read reg[0x%02x] = 0x%02x\n", __func__, __LINE__, DEFAULT_REG_JACK_STATUS, jack_status);
 		// ZZZ No need?
 		if ((jack_status & 0x2) && (switch_priv->vendor != DIO4480
-                        && switch_priv->vendor != DIO4483
-                        && switch_priv->vendor != DIO4485
-                        && switch_priv->vendor != WAS4783)) {
+			&& switch_priv->vendor != DIO4483
+			&& switch_priv->vendor != DIO4485
+			&& switch_priv->vendor != WAS4783
+			&& switch_priv->vendor != BCT4482)) {
 			//for 3 pole, mic switch to SBU2
 			dev_info(dev, "%s: set mic to sbu2 for 3 pole.\n", __func__);
 			typec_switch_usbc_update_settings(switch_priv, 0x00, 0x9F);
@@ -954,6 +1001,26 @@ static int typec_switch_usbc_analog_setup_switches(struct typec_switch_priv *swi
 
 				usleep_range(3000, 3005);
 				typec_switch_status = 1;
+			}
+		} else if (switch_priv->vendor == BCT4482) {
+			if (jack_status == 0x01) {
+				dev_info(dev, "%s: error status,swap MIC_GND\n", __func__);
+				ret = typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SELECT, 0x00);//GND - GSBU1, MIC - SBU2
+				ret = typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SETTINGS, 0x9F);
+				usleep_range(1000, 1005);
+				ret = typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_FUN_EN, 0x09);
+				usleep_range(10000, 10005);
+				regmap_read(switch_priv->regmap, DEFAULT_REG_JACK_STATUS, &jack_status);
+				dev_info(dev, "%s, %d, reg[0x%02x] = 0x%02x.\n", __func__, __LINE__, DEFAULT_REG_JACK_STATUS, jack_status);
+				typec_switch_status = 1;
+			}
+
+			if (jack_status == 0x02) {
+				//for 3 pole, mic switch to SBU2
+				dev_info(dev, "%s: set mic to sbu2 for 3 pole.\n", __func__);
+				ret = typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SELECT, 0x00);
+				ret = typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SETTINGS, 0x9F);
+				usleep_range(4000, 4005);
 			}
 		} else {
 			regmap_read(switch_priv->regmap, DEFAULT_REG_JACK_STATUS, &jack_status);
@@ -1107,6 +1174,9 @@ static int typec_switch_usbc_analog_setup_switches(struct typec_switch_priv *swi
 			typec_switch_write_register(switch_priv->regmap, 0x12, 0x10);
 			// */v1.2 end
 			dev_info(dev, "%s, %d, plugout. set to usb mode\n", __func__, __LINE__);
+		} else if (switch_priv->vendor == BCT4482) {
+			typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SELECT, 0x18);
+			typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SETTINGS, 0x98);
 		} else {
 			reg_val = 0;
 			SET_BIT(reg_val, DEFAULT_I2C_RESET);
@@ -1241,6 +1311,17 @@ int typec_switch_event(struct device_node *node,
 				typec_switch_write_register(switch_priv->regmap, DIO4485_REG_SWITCH_SETTINGS, 0x9f);
 				typec_switch_status = 0;
 			}
+		} else if (switch_priv->vendor == BCT4482) {
+				pr_info("%s - switch event: %d delay 0ms\n", __func__, event);
+				regmap_read(switch_priv->regmap, DEFAULT_REG_SWITCH_SELECT, &switch_control);
+				if ((switch_control & 0x07) == 0x07) {
+					switch_control = 0x0;
+				} else {
+					switch_control = 0x7;
+				}
+				typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SELECT, switch_control);
+				typec_switch_write_register(switch_priv->regmap, DEFAULT_REG_SWITCH_SETTINGS, 0x9f);
+				typec_switch_status = 0;
 		} else {
 			if (typec_switch_status) {
 				// TODO Readonly?
@@ -1416,6 +1497,17 @@ static void dio4485_update_reg_defaults(struct regmap *regmap)
 				dio4485_i2c_reg[i].val);
 	}
 }
+
+static void bct4482_update_reg_defaults(struct regmap *regmap)
+{
+	u8 i;
+
+	for (i = 0; i < ARRAY_SIZE(bct4482_i2c_reg); i++) {
+		typec_switch_write_register(regmap, bct4482_i2c_reg[i].reg,
+				bct4482_i2c_reg[i].val);
+	}
+}
+
 static void default_update_reg_defaults(struct regmap *regmap)
 {
 	u8 i;
@@ -1733,6 +1825,10 @@ static int typec_switch_probe(struct i2c_client *i2c,
 	case WAS_CHIP_4783:
 		switch_priv->vendor = WAS4783;
 		break;
+	case BCT_CHIP_4482:
+		switch_priv->vendor = BCT4482;
+		dev_info(dev,"Chip type is BCT4482");
+		break;
 	default:
 		goto err_data;
 	}
@@ -1753,6 +1849,10 @@ static int typec_switch_probe(struct i2c_client *i2c,
 		default_update_reg_defaults(switch_priv->regmap);
 		regmap_write(switch_priv->regmap, DEFAULT_REG_FUN_EN, 0x18);//default the compare
 		usleep_range(1*1000, 1*1005);
+	}
+	if (switch_priv->vendor == BCT4482) {
+		dev_info(dev,"Chip type is BCT4482");
+		bct4482_update_reg_defaults(switch_priv->regmap);
 	}
 
 	switch_priv->plug_state = false;
@@ -1988,6 +2088,7 @@ static const struct i2c_device_id typec_switch_i2c_id[] = {
 	{ "dio4485", 0 },
 	{ "hl5281", 0 },
 	{ "was4783", 0 },
+	{ "bct4482", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, typec_switch_i2c_id);

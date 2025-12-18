@@ -2492,6 +2492,11 @@ int oplus_panel_parse_config(struct dsi_panel *panel)
 		panel->oplus_priv.cmdq_pack_support ? "true" : "false");
 	panel->oplus_priv.cmdq_pack_state = false;
 
+	panel->oplus_priv.ddic_scaler_need_wait_te = utils->read_bool(utils->data,
+			"oplus,ddic-scaler-need-wait-te");
+	LCD_INFO("ddic_scaler_need_wait_te: %s\n",
+			panel->oplus_priv.ddic_scaler_need_wait_te ? "true" : "false");
+
 	return 0;
 }
 EXPORT_SYMBOL(oplus_panel_parse_config);
@@ -2796,7 +2801,7 @@ void oplus_save_last_mode(struct dsi_display *display)
 	}
 }
 
-void oplus_panel_switch_to_sync_te(struct dsi_panel *panel)
+void oplus_panel_switch_to_sync_te(struct dsi_panel *panel, bool half_frame_90hz)
 {
 	s64 us_per_frame;
 	s64 duration;
@@ -2863,8 +2868,12 @@ void oplus_panel_switch_to_sync_te(struct dsi_panel *panel)
 		} else if (panel->last_refresh_rate == 60) {
 			usleep_range(delay + 200, delay + 300);
 		} else if (panel->last_refresh_rate == 90) {
-			if((2100 < vsync_cost) && (vsync_cost < 3100))
-				usleep_range(2 * 1000, (2 * 1000) + 100);
+			if (half_frame_90hz) {
+				usleep_range(delay + 200, delay + 300);
+			} else {
+				if((2100 < vsync_cost) && (vsync_cost < 3100))
+					usleep_range(2 * 1000, (2 * 1000) + 100);
+			}
 		}
 	} else if (vsync_cost > vsync_width) {
 		frame_end = us_per_frame - vsync_cost;
