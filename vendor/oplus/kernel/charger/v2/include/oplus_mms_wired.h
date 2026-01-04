@@ -149,4 +149,6 @@ int oplus_wired_set_chg_path(struct oplus_mms *topic, int path);
 int oplus_wired_get_chg_path_status(struct oplus_mms *topic);
 int oplus_wired_push_info(struct oplus_mms *topic, const char *err_scene, const char *err_reason);
 int oplus_wired_iterm_check(struct oplus_mms *topic, bool enable);
+bool oplus_wired_get_supplementary_power_mos(void);
+int oplus_wired_set_supplementary_power_mos(struct oplus_mms *topic, bool enable);
 #endif /* __OPLUS_MMS_WIRED_H__ */

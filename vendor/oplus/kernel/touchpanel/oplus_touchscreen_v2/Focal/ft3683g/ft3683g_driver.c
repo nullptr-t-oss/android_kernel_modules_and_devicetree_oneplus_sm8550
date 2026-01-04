@@ -310,7 +310,7 @@ int fts_write(u8 *writebuf, u32 writelen)
 		ts_data->monitor_data->bus_buf = writebuf;
 		ts_data->monitor_data->bus_len = writelen;
 		tp_healthinfo_report(ts_data->monitor_data, HEALTH_BUS,
-			   ts_data->monitor_data->health_simulate_trigger ? &ret_err : &ret);
+				ts_data->monitor_data->health_simulate_trigger ? &ret_err : &ret);
 	}
 
 err_write:
@@ -429,7 +429,7 @@ int fts_read(u8 *cmd, u32 cmdlen, u8 *data, u32 datalen)
 		ts_data->monitor_data->bus_buf = cmd;
 		ts_data->monitor_data->bus_len = cmdlen;
 		tp_healthinfo_report(ts_data->monitor_data, HEALTH_BUS,
-			   ts_data->monitor_data->health_simulate_trigger ? &ret_err : &ret);
+				ts_data->monitor_data->health_simulate_trigger ? &ret_err : &ret);
 	}
 
 err_read:
@@ -2047,8 +2047,6 @@ static void fts_fa_fb_read(struct seq_file *s, void *chip_data, u8 base_cmd) {
 		offset = 0;
 		for (j = 0; j < FTS_DIFFER_COLS_PER_ROW; j++) {
 			pos = i * FTS_DIFFER_COLS_PER_ROW + j;
-			if (pos >= FTS_DIFFER_DATA_A_SIZE)
-			break;
 
 			offset += snprintf(buff + offset, FTS_DIFFER_BUFF_SIZE - offset,
 								 "%02x ", (unsigned char)data_a[pos]);
@@ -2613,6 +2611,25 @@ static void fts_force_glove_mode(bool enable)
 	TPD_INFO("%s: after edit glove mode reg_val=0x%x", __func__, regval);
 }
 
+static int fts_waterproof_control(bool enable)
+{
+	int retval;
+
+	TPD_INFO("%s: %s waterproof mode.\n", __func__, enable ? "Enter" : "Exit");
+
+	retval = fts_write_reg(FTS_REG_FREQUENCE_WATER_MODE, enable ? 0x00 : 0x03);
+	if (retval < 0) {
+		TPD_INFO("Failed to %s waterproof mode\n",
+				enable ? "enable" : "disable");
+		return retval;
+	}
+
+	TPD_INFO("Waterproof mode %s successfully\n",
+			enable ? "enabled" : "disabled");
+
+	return 0;
+}
+
 static int fts_mode_switch(void *chip_data, work_mode mode, int flag)
 {
 	struct chip_data_ft3683g *ts_data = (struct chip_data_ft3683g *)chip_data;
@@ -2705,6 +2722,14 @@ static int fts_mode_switch(void *chip_data, work_mode mode, int flag)
 			goto mode_err;
 		}
 
+		break;
+
+	case MODE_WATERPROOF:
+		ret = fts_waterproof_control(flag);
+		if (ret < 0) {
+			TPD_INFO("%s: enable waterproof failed\n", __func__);
+			goto mode_err;
+		}
 		break;
 
 	default:

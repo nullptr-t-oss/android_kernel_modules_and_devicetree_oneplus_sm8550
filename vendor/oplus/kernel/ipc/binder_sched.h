@@ -21,16 +21,16 @@
 
 #define CURRENT_TASK_PID				-1
 #define SYSTEM_SERVER_NAME              "system_server"
+#define SURFACEFLINGER_NAME		"surfaceflinger"
+#define SF_BCKGRNDEXEC_THREAD_NAME	"BckgrndExec HP"
+#define BD_FEATURE_MASK                 0xffffffff
+extern unsigned int g_sched_enable;
+
+#define BINDER_NAME                     "binder"
 #ifdef CONFIG_OPLUS_BINDER_REF_OPT
 #define MAX_SYSTEM_SERVER_DESC          10048
 #define SYSTEM_SERVER_UID               1000
 #endif
-
-#define BD_INHERIT_UX_ENABLE            (1 << 16)
-#define BD_INHERIT_ASYNC_UX_ENABLE      (1 << 17)
-#define BD_BINDER_REF_OPT_ENABLE        (1 << 18)
-
-#define BINDER_NAME                     "binder"
 #define HWBINDER_NAME			"hwbinder"
 #define VNDBINDER_NAME			"vndbinder"
 
@@ -52,6 +52,10 @@ enum OBS_STATUS {
 #define INVALID_VALUE           -1
 #define MAX_UX_IN_LIST			20
 #define MAX_ACCUMULATED_UX		2
+
+#define BD_INHERIT_UX_ENABLE            (1 << 16)
+#define BD_INHERIT_ASYNC_UX_ENABLE      (1 << 17)
+#define BD_BINDER_REF_OPT_ENABLE        (1 << 18)
 
 enum ASYNC_UX_TEST_ITEM {
 	 ASYNC_UX_TEST_DISABLE,
@@ -88,8 +92,8 @@ enum {
 	LOG_SET_ASYNC_UX	= 1U << 3,
 	LOG_TRACK_ASYNC_UX	= 1U << 4,
 	LOG_SET_SYNC_UX		= 1U << 5,
-	LOG_GET_LAST_ASYNC	= 1U << 6,
-	LOG_TRACK_LAST_ASYNC	= 1U << 7,
+	LOG_GET_SELECT_TASK	= 1U << 6,
+	LOG_TRACK_SELECT_TASK	= 1U << 7,
 	LOG_SET_ASYNC_AFTER_PENDING	= 1U << 8,
 	LOG_SET_SF_UX	= 1U << 9,
 	LOG_TRACK_ASYNC_NODE = 1U << 13,
@@ -117,7 +121,12 @@ enum {
 	STATE_ASYNC_HAS_THREAD = 18,
 	STATE_PENDING_ASYNC = 30,
 	STATE_MAX_DEPTH_NOT_SET_UX = 31,
-	STATE_TASK_STRUCT_STATE = 100,
+	STATE_NOT_SET_NO_THREAD = 32,
+	STATE_NOT_SET_NO_THREAD_ERR = 33,
+	STATE_USER_SET_ASYNC_UX = 33,
+	STATE_MAX_UX_FOR_SET_RANDOM = 34,
+	STATE_SERVICEMG_WAS_UX = 35,
+	STATE_TASK_STRUCT_STATE = 200,
 	STATE_SYNC_SET_UX = 50,
 	STATE_SYNC_RESET_UX = 51,
 	STATE_SYNC_RT_SET_UX = 52,
@@ -126,6 +135,9 @@ enum {
 	STATE_ASYNC_SET_UX_AFTER_NO_THREAD = 55,
 	STATE_SYNC_SET_UX_AGAIN_SERVICEMG = 56,
 	STATE_SYNC_RESET_UX_SERVICEMG = 57,
+	STATE_SET_RANDOM_UX_NO_THREAD = 58,
+	STATE_SET_SERVICEMG_UX = 59,
+	STATE_SF_ASYNC_SET_UX = 60,
 };
 
 enum {
@@ -138,6 +150,33 @@ struct oplus_binder_struct {
 	int async_ux_enable;
 	bool pending_async;
 	bool async_ux_no_thread;
+	bool sf_async_ux;
+};
+
+static inline void oplus_bd_feat_enable(unsigned int bd_feat, bool enable)
+{
+	bd_feat &= BD_FEATURE_MASK;
+	if (enable)
+		g_sched_enable = !!(bd_feat);
+	else
+		g_sched_enable = !!(~bd_feat);
+}
+
+enum {
+	GET_TASK_WHEN_SYNC_NO_THREAD,
+	GET_TASK_WHEN_ASYNC_NO_THREAD,
+	GET_TASK_WHEN_PENDING_ASYNC,
+};
+
+#define CHECK_MAX_NODE_FOR_ASYNC_THREAD	400
+#define MAX_SELECTED_TASK	5
+#define MAX_UX_THREAD_FOR_SET_RANDOM	5
+#define DESIRED_SELECT_TASK_NUM	1
+
+enum {
+	TASK_NOT_SERVICEMG,
+	SERVICEMG_WAS_UX,
+	SET_SERVICEMG_UX,
 };
 
 #endif /* _OPLUS_BINDER_SCHED_H_ */
