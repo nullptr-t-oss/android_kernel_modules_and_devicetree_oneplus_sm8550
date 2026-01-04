@@ -111,6 +111,8 @@
 #define HMAC_UPDATE			0X7c
 #define BC_POWER_ROLE_STATUS		0X7d
 #define UFCS_EXIT_MODE_NOTIFY		0X7e
+#define PD_CONNECT_HARD_RESET		0x7f
+#define GAUGE_INITED			0X90
 #endif
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
@@ -573,6 +575,7 @@ struct oplus_custom_gpio_pinctrl {
 	int tx_ovp_en_gpio;
 	int wrx_ovp_off_gpio;
 	int wrx_otg_en_gpio;
+	int supplementary_power_mos_gpio;
 	struct mutex pinctrl_mutex;
 	struct pinctrl *vchg_trig_pinctrl;
 	struct pinctrl_state *vchg_trig_default;
@@ -602,6 +605,9 @@ struct oplus_custom_gpio_pinctrl {
 	struct pinctrl *wrx_otg_en_pinctrl;
 	struct pinctrl_state *wrx_otg_en_active;
 	struct pinctrl_state *wrx_otg_en_sleep;
+	struct pinctrl *supplementary_power_pinctrl;
+	struct pinctrl_state *supplementary_power_mos_active;
+	struct pinctrl_state *supplementary_power_mos_sleep;
 };
 
 #endif
@@ -720,7 +726,11 @@ struct battery_chg_dev {
 	struct delayed_work	request_qos_work;
 	struct delayed_work	release_qos_work;
 	struct work_struct	wired_otg_enable_work;
+	struct delayed_work	gauge_register_work;
+	struct delayed_work	ufcs_reset_work;
 	struct delayed_work	update_common_charge_flag_work;
+	struct delayed_work	check_abnormal_usbin_status_work;
+	int			abnormal_usbin_count;
 	bool			qos_status;
 	u32			oem_misc_ctl_data;
 	bool			oem_usb_online;
@@ -757,6 +767,7 @@ struct battery_chg_dev {
 	bool			usb_aicl_enhance;
 	bool			soccp_support;
 	bool				qcom_gauge_cali_track_support;
+	bool			fg_register_flag;
 	struct gauge_track_cali_info_s 	*pre_info;
 	struct work_struct		gauge_cali_track_by_plug_work;
 	struct work_struct		gauge_cali_track_by_full_work;

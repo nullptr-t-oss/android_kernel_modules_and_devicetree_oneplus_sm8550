@@ -1,0 +1,4 @@
+config OPLUS_FEATURE_MM_EZRECLAIMD
+	tristate "ezr driver"
+	default n
+	depends on OPLUS_FEATURE_MM_OSVELTE && HYBRIDSWAP_ZRAM

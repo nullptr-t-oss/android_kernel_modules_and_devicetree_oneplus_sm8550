@@ -61,6 +61,8 @@
 #define OPLUS_PD_ONLY_CHECK_INTERVAL round_jiffies_relative(msecs_to_jiffies(300))
 #define OPLUS_GET_BATT_INFO_FROM_ADSP_INTERVAL round_jiffies_relative(msecs_to_jiffies(100))
 #define OPLUS_HBOOST_NOTIFY_INTERVAL round_jiffies_relative(msecs_to_jiffies(3000))
+#define ABNORMAL_CHECK_USBIN_DELAY_MS	500
+#define ABNORMAL_CHECK_USBIN_CNT	10
 
 #define OPLUS_PD_5V 5000
 #define OPLUS_PD_9V 9000
@@ -1591,6 +1593,13 @@ static void oplus_request_qos_work(struct work_struct *work)
 
 	bcdev->qos_status = true;
 	oplus_mms_wired_qos_request(1200);
+}
+
+static void oplus_ufcs_reset_work(struct work_struct *work)
+{
+	int ufcs_notify_val = UFCS_NOTIFY_UFCS_RESET_NOTIFY;
+
+	plat_ufcs_send_state(UFCS_NOTIFY_EXIT_COMM, (void *)&ufcs_notify_val);
 }
 
 static void oplus_release_qos_work(struct work_struct *work)
@@ -3224,7 +3233,6 @@ static void handle_notification(struct battery_chg_dev *bcdev, void *data,
 	struct battery_charger_notify_msg *notify_msg = data;
 	struct psy_state *pst = NULL;
 	int ret = 0;
-	int ufcs_notify_val = UFCS_NOTIFY_UFCS_RESET_NOTIRY;
 
 	if (len != sizeof(*notify_msg)) {
 		chg_err("Incorrect response length %zu\n", len);
@@ -3391,9 +3399,14 @@ static void handle_notification(struct battery_chg_dev *bcdev, void *data,
 	case HMAC_UPDATE:
 		oplus_chg_ic_virq_trigger(bcdev->gauge_ic, OPLUS_IC_VIRQ_HMAC_UPDATE);
 		break;
+	case GAUGE_INITED:
+		chg_info("GAUGE_INITED notify\n");
+		cancel_delayed_work(&bcdev->gauge_register_work);
+		schedule_delayed_work(&bcdev->gauge_register_work, 0);
+		break;
 	case UFCS_EXIT_MODE_NOTIFY:
 		chg_info("ufcs reset notify\n");
-		plat_ufcs_send_state(UFCS_NOTIFY_EXIT_COMM, (void *)&ufcs_notify_val);
+		schedule_delayed_work(&bcdev->ufcs_reset_work, msecs_to_jiffies(500));
 		break;
 #endif
 	default:
@@ -5263,6 +5276,120 @@ static int oplus_chg_parse_custom_wls_dt(struct battery_chg_dev *bcdev)
 	return 0;
 }
 
+static int oplus_get_power_mos_gpio(struct battery_chg_dev *bcdev)
+{
+	struct device_node *node = NULL;
+	int rc  = 0;
+
+	if (!bcdev) {
+		chg_err("bcdev is NULL!\n");
+		return -EINVAL;
+	}
+	node = bcdev->dev->of_node;
+
+	bcdev->oplus_custom_gpio.supplementary_power_mos_gpio =
+					of_get_named_gpio(node, "oplus,supplementary-power-gpio", 0);
+	if (!gpio_is_valid(bcdev->oplus_custom_gpio.supplementary_power_mos_gpio)) {
+		chg_err("supplementary-power-gpio not support\n");
+		return -ENOTSUPP;
+	}
+
+	rc = gpio_request(bcdev->oplus_custom_gpio.supplementary_power_mos_gpio, "supplementary-power-gpio");
+	if (rc) {
+		chg_err("unable to supplementary_power_mos_gpio:%d\n",
+						bcdev->oplus_custom_gpio.supplementary_power_mos_gpio);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int oplus_get_power_mos_pinctrl(struct battery_chg_dev *bcdev)
+{
+	if (!bcdev) {
+		chg_err("bcdev is NULL!\n");
+		return -EINVAL;
+	}
+
+	if (!gpio_is_valid(bcdev->oplus_custom_gpio.supplementary_power_mos_gpio))
+		return -EINVAL;
+
+	bcdev->oplus_custom_gpio.supplementary_power_pinctrl = devm_pinctrl_get(bcdev->dev);
+	if (IS_ERR_OR_NULL(bcdev->oplus_custom_gpio.supplementary_power_pinctrl)) {
+		chg_err("get supplementary_power_pinctrl fail\n");
+		goto free_supplementary_power_gpio;
+	}
+
+	bcdev->oplus_custom_gpio.supplementary_power_mos_active =
+				pinctrl_lookup_state(bcdev->oplus_custom_gpio.supplementary_power_pinctrl,
+									"oplus_supplementary_power_active");
+	if (IS_ERR_OR_NULL(bcdev->oplus_custom_gpio.supplementary_power_mos_active)) {
+		chg_err("get supplementary_power_mos_active fail\n");
+		goto free_supplementary_power_gpio;
+	}
+
+	bcdev->oplus_custom_gpio.supplementary_power_mos_sleep =
+				pinctrl_lookup_state(bcdev->oplus_custom_gpio.supplementary_power_pinctrl,
+									"oplus_supplementary_power_sleep");
+	if (IS_ERR_OR_NULL(bcdev->oplus_custom_gpio.supplementary_power_mos_sleep)) {
+		chg_err("get supplementary_power_mos_sleep fail\n");
+		goto free_supplementary_power_gpio;
+	}
+
+	return 0;
+
+free_supplementary_power_gpio:
+	if (gpio_is_valid(bcdev->oplus_custom_gpio.supplementary_power_mos_gpio))
+		gpio_free(bcdev->oplus_custom_gpio.supplementary_power_mos_gpio);
+	return -EINVAL;
+}
+
+static int oplus_check_supplementary_power_pinctrl(struct battery_chg_dev *bcdev)
+{
+	if (!bcdev) {
+		chg_err("bcdev not ready!\n");
+		return -ENODEV;
+	}
+
+	if (!gpio_is_valid(bcdev->oplus_custom_gpio.supplementary_power_mos_gpio) ||
+	    IS_ERR_OR_NULL(bcdev->oplus_custom_gpio.supplementary_power_pinctrl) ||
+	    IS_ERR_OR_NULL(bcdev->oplus_custom_gpio.supplementary_power_mos_active) ||
+	    IS_ERR_OR_NULL(bcdev->oplus_custom_gpio.supplementary_power_mos_sleep)) {
+		chg_err("supplementary_power pmos pinctrl error\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int oplus_supplementary_power_mos_init(struct battery_chg_dev *bcdev)
+{
+	if (!bcdev) {
+		chg_err("bcdev is NULL!\n");
+		return -EINVAL;
+	}
+
+	if ((oplus_get_power_mos_gpio(bcdev) != 0) ||
+	    (!gpio_is_valid(bcdev->oplus_custom_gpio.supplementary_power_mos_gpio)))
+		return -EINVAL;
+
+	if (oplus_get_power_mos_pinctrl(bcdev) != 0)
+		return -EINVAL;
+
+	if (oplus_check_supplementary_power_pinctrl(bcdev) != 0)
+		return -EINVAL;
+
+	mutex_lock(&bcdev->oplus_custom_gpio.pinctrl_mutex);
+	pinctrl_select_state(bcdev->oplus_custom_gpio.supplementary_power_pinctrl,
+				bcdev->oplus_custom_gpio.supplementary_power_mos_sleep);
+	mutex_unlock(&bcdev->oplus_custom_gpio.pinctrl_mutex);
+
+	chg_info("get supplementary_power_mos_gpio level[%d]\n",
+				gpio_get_value_cansleep(bcdev->oplus_custom_gpio.supplementary_power_mos_gpio));
+
+	return 0;
+}
+
 static int oplus_chg_parse_custom_dt(struct battery_chg_dev *bcdev)
 {
 	int rc = 0;
@@ -5343,6 +5470,8 @@ static int oplus_chg_parse_custom_dt(struct battery_chg_dev *bcdev)
 		}
 		chg_err("otg-ovp-en-gpio:%d\n", bcdev->oplus_custom_gpio.otg_ovp_en_gpio);
 	}
+
+	oplus_supplementary_power_mos_init(bcdev);
 
 	rc = of_property_read_u32(node, "oplus,otg_scheme",
 				  &bcdev->otg_scheme);
@@ -5805,6 +5934,8 @@ static void oplus_plugin_irq_work(struct work_struct *work)
 		bcdev->usb_in_status = 1;
 	} else {
 		bcdev->usb_in_status = 0;
+		bcdev->abnormal_usbin_count = 0;
+		cancel_delayed_work(&bcdev->check_abnormal_usbin_status_work);
 	}
 	usb_plugin_status = usb_in & 0xff;
 	chg_info("prop[%d], usb_online[%d]\n", usb_in,
@@ -7260,8 +7391,70 @@ static int oplus_chg_8350_input_present(struct oplus_chg_ic_dev *ic_dev, bool *p
 	if (pre_vbus_rising != vbus_rising) {
 		pre_vbus_rising = vbus_rising;
 		chg_info("vbus_rising=%d\n", vbus_rising);
+		if (!vbus_rising && bcdev->usb_in_status &&
+		    !work_busy(&bcdev->check_abnormal_usbin_status_work.work))
+			schedule_delayed_work(&bcdev->check_abnormal_usbin_status_work,
+				msecs_to_jiffies(ABNORMAL_CHECK_USBIN_DELAY_MS));
 	}
 	return vbus_rising;
+}
+
+static void oplus_publish_usbin_abnormal_item(struct battery_chg_dev *bcdev)
+{
+	struct mms_msg *msg;
+	int rc;
+
+	if (!is_err_topic_available(bcdev)) {
+		chg_err("error topic not found\n");
+		return;
+	}
+
+	msg = oplus_mms_alloc_int_msg(MSG_TYPE_ITEM,
+		MSG_PRIO_MEDIUM, ERR_ITEM_USBIN_ABNORMAL, 1);
+	if (msg == NULL) {
+		chg_err("alloc usbin_abnormal msg error\n");
+		return;
+	}
+
+	rc = oplus_mms_publish_msg(bcdev->err_topic, msg);
+	if (rc < 0) {
+		chg_err("publish usbin_abnormal msg error, rc=%d\n", rc);
+		kfree(msg);
+	}
+}
+
+static void oplus_check_abnormal_usbin_status_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work,
+		struct battery_chg_dev, check_abnormal_usbin_status_work.work);
+	bool vbus_rising;
+
+	if (!bcdev->usb_in_status) {
+		chg_info("usb_in_status=0, return\n");
+		bcdev->abnormal_usbin_count = 0;
+		return;
+	}
+
+	oplus_chg_8350_input_present(bcdev->buck_ic, &vbus_rising);
+	if (!vbus_rising && bcdev->usb_in_status) {
+		bcdev->abnormal_usbin_count++;
+		chg_info("abnormal detected, count=%d\n", bcdev->abnormal_usbin_count);
+
+		if (bcdev->abnormal_usbin_count >= ABNORMAL_CHECK_USBIN_CNT) {
+			chg_info("schedule plugin_irq_work\n");
+			oplus_publish_usbin_abnormal_item(bcdev);
+			schedule_delayed_work(&bcdev->plugin_irq_work, 0);
+			bcdev->abnormal_usbin_count = 0;
+			return;
+		}
+	} else {
+		chg_info("vbus_rising=%d bcdev->usb_in_status=%d\n", vbus_rising, bcdev->usb_in_status);
+		bcdev->abnormal_usbin_count = 0;
+		return;
+	}
+
+	schedule_delayed_work(&bcdev->check_abnormal_usbin_status_work,
+		msecs_to_jiffies(ABNORMAL_CHECK_USBIN_DELAY_MS));
 }
 
 static int oplus_chg_8350_input_suspend(struct oplus_chg_ic_dev *ic_dev, bool suspend)
@@ -9774,6 +9967,119 @@ static int oplus_chg_8350_iterm_check(struct oplus_chg_ic_dev *ic_dev, bool chec
 	return rc;
 }
 
+static int oplus_get_supplementary_power_mos_enable(struct oplus_chg_ic_dev *ic_dev, bool *enable)
+{
+	struct battery_chg_dev *bcdev;
+	struct oplus_custom_gpio_pinctrl *poplus_custom_gpio;
+
+	if (ic_dev == NULL) {
+		chg_err("ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	bcdev = oplus_chg_ic_get_drvdata(ic_dev);
+
+	if (!bcdev) {
+		chg_err("bcdev not ready!\n");
+		return -ENODEV;
+	}
+
+
+	poplus_custom_gpio = &bcdev->oplus_custom_gpio;
+	if (!gpio_is_valid(poplus_custom_gpio->supplementary_power_mos_gpio) ||
+	    IS_ERR_OR_NULL(poplus_custom_gpio->supplementary_power_pinctrl) ||
+	    IS_ERR_OR_NULL(poplus_custom_gpio->supplementary_power_mos_active) ||
+	    IS_ERR_OR_NULL(poplus_custom_gpio->supplementary_power_mos_sleep)) {
+		chg_info("supplementary_power pmos pinctrl no support\n");
+		return -EINVAL;
+	}
+
+
+	if (gpio_get_value_cansleep(poplus_custom_gpio->supplementary_power_mos_gpio))
+		*enable = true;
+	else
+		*enable = false;
+
+	return 0;
+}
+
+static bool oplus_check_supplementary_power_change(struct battery_chg_dev *bcdev, bool enable)
+{
+	bool curr_enable_status;
+	struct oplus_custom_gpio_pinctrl *poplus_custom_gpio;
+
+	poplus_custom_gpio = &bcdev->oplus_custom_gpio;
+
+	curr_enable_status = (bool)(!!gpio_get_value_cansleep(poplus_custom_gpio->supplementary_power_mos_gpio));
+	chg_debug("enable:%d, curr_enable_status:%d\n", enable, curr_enable_status);
+
+	if (curr_enable_status != enable)
+		return true;
+	else
+		return false;
+}
+
+static int oplus_set_supplementary_power_mos_enable(struct oplus_chg_ic_dev *ic_dev, bool enable)
+{
+	int rc;
+	struct battery_chg_dev *bcdev;
+	bool mos_status = enable;
+
+	struct oplus_custom_gpio_pinctrl *poplus_custom_gpio;
+
+	if (ic_dev == NULL) {
+		chg_err("battery_chg_dev is NULL");
+		return -ENODEV;
+	}
+
+	bcdev = oplus_chg_ic_get_drvdata(ic_dev);
+
+	if (bcdev == NULL) {
+		chg_err("bcdev is NULL");
+		return -ENODEV;
+	}
+
+	if (oplus_check_supplementary_power_pinctrl(bcdev) != 0)
+		return -EINVAL;
+
+	poplus_custom_gpio = &bcdev->oplus_custom_gpio;
+
+	if (!oplus_check_supplementary_power_change(bcdev, mos_status))
+		return 0;
+
+	mutex_lock(&poplus_custom_gpio->pinctrl_mutex);
+	if (mos_status)
+		rc = pinctrl_select_state(poplus_custom_gpio->supplementary_power_pinctrl,
+			poplus_custom_gpio->supplementary_power_mos_active);
+	else
+		rc = pinctrl_select_state(poplus_custom_gpio->supplementary_power_pinctrl,
+			poplus_custom_gpio->supplementary_power_mos_sleep);
+	mutex_unlock(&poplus_custom_gpio->pinctrl_mutex);
+
+	if (rc < 0) {
+		chg_err("supplementary power mos can't %s\n", mos_status ? "enable" : "disable");
+	} else {
+		rc = 0;
+		chg_info("set value:%d, gpio_val:%d\n", mos_status,
+			gpio_get_value_cansleep(poplus_custom_gpio->supplementary_power_mos_gpio));
+	}
+
+	return rc;
+}
+
+static int oplus_supplementary_power_mos_config(struct oplus_chg_ic_dev *ic_dev, bool enable)
+{
+	bool mos_status = enable;
+	int rc;
+
+	if (oplus_is_rf_ftm_mode())
+		mos_status = false;
+
+	rc = oplus_set_supplementary_power_mos_enable(ic_dev, mos_status);
+
+	return rc;
+}
+
 #ifdef OPLUS_FEATURE_CHG_BASIC
 
 static int oplus_chg_adsp_set_plc_status(struct battery_chg_dev *bcdev, int status)
@@ -10020,6 +10326,12 @@ static void *oplus_chg_8350_buck_get_func(struct oplus_chg_ic_dev *ic_dev, enum 
 		break;
 	case OPLUS_IC_FUNC_BUCK_ITEM_CHECK:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_ITEM_CHECK, oplus_chg_8350_iterm_check);
+		break;
+	case OPLUS_IC_FUNC_BUCK_SET_POWER_MOS_ENABLE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_SET_POWER_MOS_ENABLE, oplus_supplementary_power_mos_config);
+		break;
+	case OPLUS_IC_FUNC_BUCK_GET_POWER_MOS_ENABLE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_GET_POWER_MOS_ENABLE, oplus_get_supplementary_power_mos_enable);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);
@@ -13390,6 +13702,69 @@ static int oplus_sm8350_get_gauge_devinfo(struct device_node *node, const char *
 }
 
 #define DEVINFO_DATA_NUM	2
+#define GAUGE_WAIT_TIMEOUT	3000
+static void oplus_gauge_register_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work,
+		struct battery_chg_dev, gauge_register_work.work);
+	enum oplus_chg_ic_type ic_type;
+	int ic_index;
+	struct device_node *child;
+	struct oplus_chg_ic_dev *ic_dev = NULL;
+	struct oplus_chg_ic_cfg ic_cfg;
+	int rc;
+	const char *gauge_name[DEVINFO_DATA_NUM];
+
+	if (bcdev->fg_register_flag)
+		return;
+
+	bcdev->fg_register_flag = true;
+	for_each_child_of_node(bcdev->dev->of_node, child) {
+		rc = of_property_read_u32(child, "oplus,ic_type", &ic_type);
+		if (rc < 0) {
+			chg_err("can't get %s ic type, rc=%d\n", child->name, rc);
+			continue;
+		}
+		rc = of_property_read_u32(child, "oplus,ic_index", &ic_index);
+		if (rc < 0) {
+			chg_err("can't get %s ic index, rc=%d\n", child->name, rc);
+			continue;
+		}
+		if (ic_type != OPLUS_CHG_IC_GAUGE)
+			continue;
+		ic_cfg.name = child->name;
+		ic_cfg.index = ic_index;
+		ic_cfg.type = ic_type;
+		ic_cfg.of_node = child;
+
+		rc = oplus_sm8350_get_gauge_devinfo(child, gauge_name);
+		if (rc != 0)
+			gauge_name[0] = "bq28z610";
+		else
+			chg_info("gauge_name=%s\n", gauge_name[0]);
+		if (oplus_chg_get_voocphy_support(bcdev) == ADSP_VOOCPHY)
+			snprintf(ic_cfg.manu_name, OPLUS_CHG_IC_MANU_NAME_MAX - 1, "gauge-%s", gauge_name[0]);
+		else
+			snprintf(ic_cfg.manu_name, OPLUS_CHG_IC_MANU_NAME_MAX - 1, "gauge-adsp");
+		snprintf(ic_cfg.fw_id, OPLUS_CHG_IC_FW_ID_MAX - 1, "0x00");
+		ic_cfg.get_func = oplus_chg_8350_gauge_get_func;
+		ic_cfg.virq_data = oplus_chg_8350_gauge_virq_table;
+		ic_cfg.virq_num = ARRAY_SIZE(oplus_chg_8350_gauge_virq_table);
+
+		ic_dev = devm_oplus_chg_ic_register(bcdev->dev, &ic_cfg);
+		if (!ic_dev) {
+			rc = -ENODEV;
+			chg_err("register %s error\n", child->name);
+			continue;
+		}
+		chg_info("register %s\n", child->name);
+
+		bcdev->gauge_ic = ic_dev;
+
+		of_platform_populate(child, NULL, NULL, bcdev->dev);
+	}
+}
+
 static int oplus_sm8350_ic_register(struct battery_chg_dev *bcdev)
 {
 	enum oplus_chg_ic_type ic_type;
@@ -13401,6 +13776,7 @@ static int oplus_sm8350_ic_register(struct battery_chg_dev *bcdev)
 	struct device_attribute **attrs;
 	struct device_attribute *attr;
 	const char *gauge_name[DEVINFO_DATA_NUM];
+	int check_fg = 0;
 
 	for_each_child_of_node(bcdev->dev->of_node, child) {
 		rc = of_property_read_u32(child, "oplus,ic_type", &ic_type);
@@ -13426,6 +13802,22 @@ static int oplus_sm8350_ic_register(struct battery_chg_dev *bcdev)
 			ic_cfg.virq_num = ARRAY_SIZE(oplus_chg_8350_buck_virq_table);
 			break;
 		case OPLUS_CHG_IC_GAUGE:
+			if (bcdev->soccp_support) {
+				rc = read_property_id(bcdev, &bcdev->oplus_psy, OPLUS_CHECK_FG);
+				if (rc < 0) {
+					chg_err("read OPLUS_CHECK_FG fail\n");
+					check_fg = 0;
+				} else {
+					check_fg = bcdev->oplus_psy.prop[OPLUS_CHECK_FG];
+				}
+				if (!check_fg) {
+					schedule_delayed_work(&bcdev->gauge_register_work,
+						msecs_to_jiffies(GAUGE_WAIT_TIMEOUT));
+				} else {
+					schedule_delayed_work(&bcdev->gauge_register_work, 0);
+				}
+				continue;
+			}
 			rc = oplus_sm8350_get_gauge_devinfo(child, gauge_name);
 			if (rc != 0)
 				gauge_name[0] = "bq28z610";
@@ -13787,7 +14179,10 @@ static int battery_chg_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&bcdev->request_qos_work, oplus_request_qos_work);
 	INIT_DELAYED_WORK(&bcdev->release_qos_work, oplus_release_qos_work);
 	INIT_WORK(&bcdev->wired_otg_enable_work, oplus_wired_otg_enable_work);
+	INIT_DELAYED_WORK(&bcdev->ufcs_reset_work, oplus_ufcs_reset_work);
+	INIT_DELAYED_WORK(&bcdev->gauge_register_work, oplus_gauge_register_work);
 	INIT_DELAYED_WORK(&bcdev->update_common_charge_flag_work, oplus_update_common_charge_flag_work);
+	INIT_DELAYED_WORK(&bcdev->check_abnormal_usbin_status_work, oplus_check_abnormal_usbin_status_work);
 #endif
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	INIT_DELAYED_WORK(&bcdev->vchg_trig_work, oplus_vchg_trig_work);

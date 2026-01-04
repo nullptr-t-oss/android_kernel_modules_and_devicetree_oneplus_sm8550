@@ -436,6 +436,7 @@
 	qcom,recharge-mv = <100>;
 	qcom,batt_capacity_mah = <5000>;/*typical capacity*/
 	//qcom,batt_capacity_mah = <4870>; /*rated capacity*/
+	oplus,batt_full_time = <60>;
 
 	qcom,removed_bat_decidegc = <390>;  /*<-39C*/
 

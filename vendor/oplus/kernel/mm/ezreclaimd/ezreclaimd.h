@@ -14,8 +14,9 @@
 
 #include "../../mm/internal.h"
 
-#include "../../mm_osvelte/common.h"
-#include "../../mm_osvelte/mm-trace.h"
+#include "../mm_osvelte/common.h"
+#include "../mm_osvelte/mm-trace.h"
+#include "../mm_osvelte/mm-config.h"
 
 /* above all copy from hybridswap for compatiable */
 #define ezr_lru(lruvec) (&(lruvec->lists[0]))
@@ -175,4 +176,12 @@ extern unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
 						  unsigned long nr_pages,
 						  gfp_t gfp_mask,
 						  bool may_swap);
+
+extern bool ezr_free_zram_is_ok(void);
+extern bool ezr_display_off(void);
+extern unsigned int ezr_min_avail_buffers_value(void);
+extern unsigned int ezr_high_avail_buffers_value(void);
+extern bool ezr_swapd_pasue(void);
+extern ezr_set_swapd_pid(pid_t pid);
+extern void ezr_register_nr_pages(atomic_t *nr);
 #endif /* __EZRERECLAIM_H */

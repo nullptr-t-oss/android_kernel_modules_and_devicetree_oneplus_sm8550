@@ -716,7 +716,7 @@ static inline int read_esuo_pages(struct hybridswap_stat *stat)
 	unsigned long eswap_used_pages = atomic64_read(&stat->stored_pages);
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE) && IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD)
 	if (ezreclaimd_enable)
-		return atomic_read(&ezreclaimable_nr) << (PAGE_SHIFT - 10);
+		return ezr_nr_pages() << (PAGE_SHIFT - 10);
 #endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE && CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD */
 	return (int) (eswap_used_pages << (PAGE_SHIFT - 10));
 }

@@ -447,6 +447,9 @@
 	qcom,smart_charging_screenoff;
 	qcom,support_3p6_standard;
 	qcom,voocphy_support = <3>;
+	oplus,full_limit_curr_support;
+	oplus,fcl_index = <0>;
+	oplus,vb_offset = <40>;
 	qcom,input_current_charger_ma = <2000>;
 	qcom,pd_input_current_charger_ma = <2000>;
 	qcom,qc_input_current_charger_ma = <2000>;
