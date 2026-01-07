@@ -7494,6 +7494,11 @@ static void oplus_apvphy_set_wired_online(struct device *dev, int online)
 {
 	struct oplus_voocphy_manager *chip = dev_get_drvdata(dev);
 
+	if (chip == NULL) {
+		chg_err("chip is NULL\n");
+		return;
+	}
+
 	if (!chip->ic_abnormal && !chip->slave_ic_abnormal)
 		return;
 

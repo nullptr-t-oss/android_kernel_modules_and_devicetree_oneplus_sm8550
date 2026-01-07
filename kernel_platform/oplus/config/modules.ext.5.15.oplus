@@ -19,3 +19,4 @@
 ../vendor/oplus/kernel/wifi/oplus_wifi_wsa
 ../vendor/oplus/sensor/kernel/sensorhub/pseudo-sensor
 ../vendor/oplus/kernel/framework_stability/oplus_stability_helper
+../vendor/oplus/kernel/patch
