@@ -158,7 +158,7 @@ static ssize_t level_protect_enable_ops_read(struct file *file,
 	char kbuf[MAX_BUF_LEN] = {'\0'};
 	int len;
 
-	len = snprintf(kbuf, MAX_BUF_LEN, "%d\n", level_protect_enable);
+	len = snprintf(kbuf, MAX_BUF_LEN, "%d\n", atomic_read(&level_protect_enable));
 
 	if (len > *off)
 		len -= *off;
@@ -238,7 +238,7 @@ static ssize_t oplus_level_protect_inode_write(struct file *file,
 	struct file *protect_file;
 	long fd = -1;
 	unsigned long num_pages = 0;
-	unsigned int inode_mapcount = -1;
+	int inode_mapcount = -1;
 	unsigned long ino = 0;
 	struct inode_protect_struct *inode_protect_entry = NULL;
 	int fd_len;
@@ -279,6 +279,7 @@ static ssize_t oplus_level_protect_inode_write(struct file *file,
 		}
 		ino = file_inode(protect_file)->i_ino;
 		fput(protect_file);
+
 		inode_protect_entry = kmalloc(sizeof(struct inode_protect_struct), GFP_KERNEL);
 
 		if (inode_protect_entry == NULL) {
@@ -299,8 +300,12 @@ static ssize_t oplus_level_protect_inode_write(struct file *file,
 			pr_info("add to inode list %lu, mapcount %d\n", inode_protect_entry->ino, inode_protect_entry->mapcount);
 			list_add(&inode_protect_entry->list, &inode_protect_array);
 			inode_cur_num++;
+			spin_unlock_irq(&inode_protect_lock);
+
+		} else {
+			spin_unlock_irq(&inode_protect_lock);
+			kfree(inode_protect_entry);
 		}
-		spin_unlock_irq(&inode_protect_lock);
 	}
 	return len;
 }

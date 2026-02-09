@@ -4652,7 +4652,7 @@ void hybridswap_track(struct zram *zram, u32 index,
 
 	hybs = MEMCGRP_ITEM_DATA(memcg);
 	if (!hybs) {
-		hybs = hybridswap_cache_alloc(memcg, false);
+		hybs = hybridswap_cache_alloc(memcg, false, false);
 		if (!hybs) {
 			stat = hybridswap_get_stat_obj();
 			if (stat)

@@ -76,7 +76,6 @@ def define_oplus_local_modules():
             "common/oplus_fdleak/oplus_fdleak_check.c",
         ]),
         conditional_defines = {
-            "mtk":  ["CONFIG_OPLUS_SYSTEM_KERNEL_MTK"],
             "qcom": ["CONFIG_OPLUS_SYSTEM_KERNEL_QCOM"],
         },
 #        header_deps = [
@@ -92,7 +91,6 @@ def define_oplus_local_modules():
             "common/oplus_saupwk/oplus_saupwk.c",
         ]),
         conditional_defines = {
-            "mtk":  ["CONFIG_OPLUS_SYSTEM_KERNEL_MTK"],
             "qcom": ["CONFIG_OPLUS_SYSTEM_KERNEL_QCOM"],
         },
         includes = ["."],
@@ -130,7 +128,6 @@ def define_oplus_local_modules():
             "common/theia/theia_send_event.c",
         ]),
         conditional_defines = {
-            "mtk":  ["CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY"],
             "qcom": ["CONFIG_QCOM_PANEL_EVENT_NOTIFIER"],
         },
         includes = ["."],
@@ -144,7 +141,6 @@ def define_oplus_local_modules():
         ]),
         conditional_srcs = {
             "CONFIG_OPLUS_DDK_MTK": {
-                True:  ["mtk/mtk_shutdown_reboot/mtk_force_shutdown.c"],
                 False: ["qcom/force_shutdown/force_shutdown.c"],
             }
         },
@@ -158,7 +154,6 @@ def define_oplus_local_modules():
         ]),
         conditional_srcs = {
             "CONFIG_OPLUS_DDK_MTK": {
-                True:  ["mtk/oplus_pmic_monitor_mtk/oplus_pmic_info_get_mtk.c","mtk/oplus_pmic_monitor_mtk/main.c"],
                 False: ["qcom/qcom_pmic_monitor/oplus_pmic_info_smem.c",
 			"qcom/qcom_pmic_monitor/main.c",
 			"qcom/qcom_pmic_monitor/oplus_pmic_machine_state.c",

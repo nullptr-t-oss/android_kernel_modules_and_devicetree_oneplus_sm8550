@@ -32,3 +32,4 @@ schedtune_task_boost
 tcf_block_get
 tcf_block_put
 tcf_classify
+rtnl_kfree_skbs

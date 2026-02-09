@@ -2498,7 +2498,6 @@ void ili_aod_gesture_mode (u8 *buf, int len)
 }
 int ili_report_handler(void *chip_data)
 {
-	struct ilitek_ts_data *chip_info = (struct ilitek_ts_data *)chip_data;
 	int ret = 0, pid = 0;
 	u8  checksum = 0, pack_checksum = 0;
 	u8 *trdata = NULL;
@@ -2567,11 +2566,8 @@ int ili_report_handler(void *chip_data)
 	ILI_DBG("Packet ID = %x\n", pid);
 	if (ilits->actual_tp_mode == P5_X_FW_AP_MODE) {
 		if (pid == P5_X_DEMO_PALM_PACKET_ID) {
-			if (chip_info->ts->palm_to_sleep_enable) {
-				ILI_INFO("PALM PACKET ID Code = 0x%X", pid);
-				ret = P5_X_DEMO_PALM_PACKET_ID;
-				goto out;
-			}
+			ILI_INFO("PALM PACKET ID Code = 0x%X", pid);
+			ret = P5_X_DEMO_PALM_PACKET_ID;
 			goto out;
 		}
 	}
