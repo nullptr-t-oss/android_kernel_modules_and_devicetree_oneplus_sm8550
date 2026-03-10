@@ -9,8 +9,3 @@ config OPLUS_FEATURE_MM_OSVELTE_DBG
 	default n
 	help
 	  This driver used for memory debugging.
-
-config OPLUS_FEATURE_MM_EZRECLAIMD
-	bool "Enable ezreclaimd reclaim pages in background"
-	default n
-	depends on OPLUS_FEATURE_MM_OSVELTE

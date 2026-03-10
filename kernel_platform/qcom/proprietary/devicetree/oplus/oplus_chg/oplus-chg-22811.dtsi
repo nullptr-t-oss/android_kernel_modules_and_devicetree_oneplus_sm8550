@@ -221,6 +221,11 @@
 		track,voocphy_type = <1>;
 		track,wired_max_power = <100000>;
 		track,wired_fast_chg_scheme = <0>;
+
+		track,gauge_status_ctrl;
+		track,nominal_qmax1 = <2480>;
+		track,nominal_fcc1 = <2300>;
+		track,external_gauge_num = <1>;
 	};
 	usb_nop_phy: usb_nop_phy {
 		compatible = "usb-nop-xceiv";
@@ -282,6 +287,7 @@
 	//qcom,input_current_led_ma_overtemp = <900>;
 	qcom,iterm_ma = <132>;
 	qcom,recharge-mv = <100>;
+	oplus,batt_full_time = <60>;
 	qcom,batt_capacity_mah = <5000>;/*typical capacity*/
 	//qcom,batt_capacity_mah = <4400>; /*rated capacity*/
 	qcom,removed_bat_decidegc = <390>;  /*<-39C*/

@@ -135,10 +135,6 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
 	u32 pre_off_ms, post_off_ms;
 #ifdef OPLUS_FEATURE_DISPLAY
 	struct dsi_display *display = get_main_display();
-	if (!display) {
-		DSI_ERR("dsi_pwr_enable_vregs display panel null\n");
-		return -ENODEV;
-	}
 #endif /* OPLUS_FEATURE_DISPLAY */
 
 	if (enable) {
@@ -181,7 +177,9 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
 				usleep_range((post_on_ms * 1000),
 						(post_on_ms * 1000) + 10);
 #ifdef OPLUS_FEATURE_DISPLAY
-			oplus_panel_vddr_on(display->panel, vreg->vreg_name);
+			if (display) {
+				oplus_panel_vddr_on(display->panel, vreg->vreg_name);
+			}
 #endif /* OPLUS_FEATURE_DISPLAY */
 		}
 	} else {
@@ -209,7 +207,9 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
 						regs->vregs[i].off_min_voltage,
 						regs->vregs[i].max_voltage);
 #ifdef OPLUS_FEATURE_DISPLAY
-			oplus_panel_vddr_off(display->panel, vreg->vreg_name);
+			if (display) {
+				oplus_panel_vddr_off(display->panel, vreg->vreg_name);
+			}
 #endif /* OPLUS_FEATURE_DISPLAY */
 		}
 	}

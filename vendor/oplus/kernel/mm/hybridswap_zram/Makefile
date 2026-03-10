@@ -10,5 +10,5 @@ oplus_bsp_hybridswap_zram-y	:=	zcomp.o zram_drv.o
 oplus_bsp_hybridswap_zram-$(CONFIG_KCOMPRESSD)	+=  kcompressd.o
 oplus_bsp_hybridswap_zram-$(CONFIG_HYBRIDSWAP) += hybridswap/hybridmain.o
 oplus_bsp_hybridswap_zram-$(CONFIG_HYBRIDSWAP_SWAPD) += hybridswap/hybridswapd.o hybridswap/display.o
-oplus_bsp_hybridswap_zram-$(CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD) += hybridswap/ezreclaimd.o
+oplus_bsp_hybridswap_zram-$(CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD) += hybridswap/ezr_empty.o
 oplus_bsp_hybridswap_zram-$(CONFIG_HYBRIDSWAP_CORE) += hybridswap/hybridswap.o

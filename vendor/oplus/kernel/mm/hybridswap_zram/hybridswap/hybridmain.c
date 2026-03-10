@@ -175,7 +175,8 @@ ssize_t hybridswap_loglevel_show(struct device *dev,
 }
 
 /* Make sure the memcg is not NULL in caller */
-memcg_hybs_t *hybridswap_cache_alloc(struct mem_cgroup *memcg, bool atomic)
+memcg_hybs_t *hybridswap_cache_alloc(struct mem_cgroup *memcg, bool atomic,
+				     bool css_alloc)
 {
 	memcg_hybs_t *hybs;
 	u64 ret;
@@ -192,6 +193,8 @@ memcg_hybs_t *hybridswap_cache_alloc(struct mem_cgroup *memcg, bool atomic)
 		log_err("alloc memcg_hybs_t failed\n");
 		return NULL;
 	}
+
+	hybs->css_alloc = css_alloc;
 
 	INIT_LIST_HEAD(&hybs->score_node);
 #ifdef CONFIG_HYBRIDSWAP_CORE
@@ -221,7 +224,7 @@ static void mem_cgroup_alloc_hook(void *data, struct mem_cgroup *memcg)
 	if (memcg->android_oem_data1[0])
 		BUG();
 
-	hybridswap_cache_alloc(memcg, true);
+	hybridswap_cache_alloc(memcg, true, true);
 }
 
 static void mem_cgroup_free_hook(void *data, struct mem_cgroup *memcg)
@@ -276,12 +279,21 @@ static void mem_cgroup_css_offline_hook(void *data,
 		struct cgroup_subsys_state *css, struct mem_cgroup *memcg)
 {
 	unsigned long flags;
+	memcg_hybs_t *hybs = MEMCGRP_ITEM_DATA(memcg);
 
-	if (memcg->android_oem_data1[0]) {
+	if (hybs) {
 		spin_lock_irqsave(&score_list_lock, flags);
 		list_del_init(&MEMCGRP_ITEM(memcg, score_node));
 		spin_unlock_irqrestore(&score_list_lock, flags);
-		css_put(css);
+
+		/*
+		 * if hybs allocated after css_alloc(), then css refcount is
+		 * error without css_get(). Actually we can remove get/put in
+		 * hooks, however, for compatiable, just invokes css_put()
+		 * if alloc in css_alloc_hook().
+		 */
+		if (hybs->css_alloc)
+			css_put(css);
 	}
 }
 
@@ -416,6 +428,10 @@ static unsigned long memcg_lru_pages(struct mem_cgroup *memcg,
 				     enum lru_list lru, bool chp_unused)
 {
 	int idx;
+
+	/* chp disabled on OS16.0, always return 0 */
+	if (chp_unused)
+		return 0;
 
 	switch (lru) {
 	case LRU_INACTIVE_ANON:
@@ -639,251 +655,6 @@ static ssize_t mem_cgroup_force_shrink_file(struct kernfs_open_file *of,
 	return mem_cgroup_force_shrink(of, buf, nbytes, true);
 }
 
-static inline bool page_evictable(struct page *page)
-{
-	bool ret;
-
-	/* Prevent address_space of inode and swap cache from being freed */
-	rcu_read_lock();
-	ret = !mapping_unevictable(page_mapping(page)) && !PageMlocked(page);
-	rcu_read_unlock();
-	return ret;
-}
-
-/**
- * isolate_page_from_lru - a copy of isolate_lru_page, but
- * lru_lock must be held before calling this function.
- * Restrictions:
- * (1) Must be called with an elevated refcount on the page. This is a
- *     fundamental difference from isolate_lru_pages (which is called
- *     without a stable reference).
- * (2) The lru_lock must be held.
- */
-static int isolate_page_from_lru(struct page *page, struct lruvec *lruvec)
-{
-	int ret = -EBUSY;
-
-	VM_BUG_ON_PAGE(!page_count(page), page);
-	WARN_RATELIMIT(PageTail(page), "trying to isolate tail page");
-
-	if (TestClearPageLRU(page)) {
-		get_page(page);
-		del_page_from_lru_list(page, lruvec);
-		ret = 0;
-	}
-
-	return ret;
-}
-
-/**
- * putback_page_to_lru - a copy of putback_lru_page
- *
- * lru_lock must not be held, interrupts must be enabled.
- */
-static void putback_page_to_lru(struct page *page)
-{
-	lru_cache_add(page);
-	put_page(page);		/* drop ref from isolate */
-}
-
-static unsigned long isolate_pages_to_page_list(struct lruvec *lruvec,
-		enum lru_list lru, struct list_head *page_list,
-		unsigned long nr_to_isolate)
-{
-	unsigned long nr_isolated = 0, nr_scanned = 0, nr_pages;
-	struct list_head *src = &lruvec->lists[lru];
-
-	while (!list_empty(src) && nr_scanned < nr_to_isolate) {
-		struct page *page = lru_to_page(src);
-		nr_pages = thp_nr_pages(page);
-		nr_scanned += nr_pages;
-
-		if (likely(get_page_unless_zero(page))) {
-			if (isolate_page_from_lru(page, lruvec)) {
-				spin_unlock_irq(&lruvec->lru_lock);
-				put_page(page);
-				spin_lock_irq(&lruvec->lru_lock);
-				continue;
-			}
-			put_page(page);
-		} else
-			continue;
-
-		list_add(&page->lru, page_list);
-		nr_isolated += nr_pages;
-	}
-	return nr_isolated;
-}
-
-/*
- * Seperate the src_list to active and inactive,
- * by check the PTE_AC.
- */
-static void seperate_list(struct list_head *src,
-			  struct list_head *active,
-			  struct list_head *inactive,
-			  struct mem_cgroup *memcg)
-{
-	unsigned long vm_flags;
-
-	while (!list_empty(src)) {
-		struct page *page = lru_to_page(src);
-		list_del(&page->lru);
-
-		if (unlikely(!page_evictable(page))) {
-			putback_page_to_lru(page);
-			continue;
-		}
-
-		if (page_referenced(page, 0, memcg, &vm_flags)) {
-			SetPageActive(page);
-			list_add(&page->lru, active);
-		} else {
-			ClearPageActive(page);
-			list_add(&page->lru, inactive);
-		}
-		cond_resched();
-	}
-}
-
-/*
- * move_pages_into_lru(), a copy of move_pages_to_lru()
- * Moves pages from private @list to appropriate LRU list.
- *
- * Returns the number of pages moved to the given lruvec.
- */
-static unsigned long move_pages_into_lru(struct lruvec *lruvec,
-				      struct list_head *list)
-{
-	unsigned long nr_moved = 0;
-
-	while (!list_empty(list)) {
-		struct page *page = lru_to_page(list);
-		VM_BUG_ON_PAGE(PageLRU(page), page);
-		list_del(&page->lru);
-		if (unlikely(!page_evictable(page))) {
-			putback_page_to_lru(page);
-			continue;
-		}
-
-		/*
-		 * The SetPageLRU needs to be kept here for list integrity.
-		 * Otherwise:
-		 *   #0 move_pages_to_lru             #1 release_pages
-		 *   if !put_page_testzero
-		 *				      if (put_page_testzero())
-		 *				        !PageLRU //skip lru_lock
-		 *     SetPageLRU()
-		 *     list_add(&page->lru,)
-		 *                                        list_add(&page->lru,)
-		 */
-
-		/*
-		 * All pages were isolated from the same lruvec (and isolation
-		 * inhibits memcg migration).
-		 */
-		spin_lock_irq(&lruvec->lru_lock);
-		VM_BUG_ON_PAGE(!page_matches_lruvec(page, lruvec), page);
-		SetPageLRU(page);
-		add_page_to_lru_list(page, lruvec);
-		nr_moved += thp_nr_pages(page);
-		spin_unlock_irq(&lruvec->lru_lock);
-
-		put_page(page);
-	}
-
-	return nr_moved;
-}
-
-static void mem_cgroup_aging_anon_lruvec(struct mem_cgroup *memcg,
-		struct lruvec *lruvec, unsigned long lru_mask, bool is_chp)
-{
-	pg_data_t *pgdat = NODE_DATA(0);
-	unsigned long nr_to_isolate_active = 0, nr_to_isolate_inactive = 0, total_isolated = 0;
-#ifdef CHP_SWAP_CLUSTER_MAX
-	unsigned int each_batch = (is_chp ? CHP_SWAP_CLUSTER_MAX : SWAP_CLUSTER_MAX);
-#else
-	unsigned int each_batch = SWAP_CLUSTER_MAX;
-#endif
-
-	LIST_HEAD(l_hold);
-	LIST_HEAD(l_active);
-	LIST_HEAD(l_inactive);
-
-	if (BIT(LRU_INACTIVE_ANON) & lru_mask) {
-		nr_to_isolate_inactive = memcg_lru_pages(memcg, LRU_INACTIVE_ANON, is_chp);
-		log_info("nr_to_isolate from %s inactive anon: %lu",
-			 is_chp ? "chp" : "normal", nr_to_isolate_inactive);
-	}
-
-	if (BIT(LRU_ACTIVE_ANON) & lru_mask) {
-		nr_to_isolate_active = memcg_lru_pages(memcg, LRU_ACTIVE_ANON, is_chp);
-		log_info("nr_to_isolate from %s active anon: %lu",
-			 is_chp ? "chp" : "normal", nr_to_isolate_active);
-	}
-
-	while ((nr_to_isolate_inactive && memcg_lru_pages(memcg, LRU_INACTIVE_ANON, is_chp))
-		|| (nr_to_isolate_active && memcg_lru_pages(memcg, LRU_ACTIVE_ANON, is_chp))) {
-		unsigned long isolated = 0;
-		unsigned long cur_isolated = 0;
-
-		if (nr_to_isolate_inactive) {
-			spin_lock_irq(&lruvec->lru_lock);
-			isolated =
-				isolate_pages_to_page_list(lruvec, LRU_INACTIVE_ANON, &l_hold, each_batch);
-			spin_unlock_irq(&lruvec->lru_lock);
-
-			cur_isolated += isolated;
-			total_isolated += isolated;
-			nr_to_isolate_inactive -= min(nr_to_isolate_inactive, isolated);
-			log_dbg("inactive isolated, batch: %lu, total: %lu, left %lu", isolated,
-					total_isolated, nr_to_isolate_inactive);
-		}
-
-		if (nr_to_isolate_active) {
-			spin_lock_irq(&lruvec->lru_lock);
-			isolated =
-				isolate_pages_to_page_list(lruvec, LRU_ACTIVE_ANON, &l_hold, each_batch);
-			spin_unlock_irq(&lruvec->lru_lock);
-
-			cur_isolated += isolated;
-			total_isolated += isolated;
-			nr_to_isolate_active -= min(nr_to_isolate_active, isolated);
-			log_dbg("active isolated, batch: %lu, total: %lu, left %lu", isolated,
-					total_isolated, nr_to_isolate_active);
-		}
-
-		mod_node_page_state(pgdat, NR_ISOLATED_ANON, cur_isolated);
-	}
-
-	log_info("total_isolated: %lu %s pages", total_isolated, is_chp ? "chp" : "normal");
-
-	/* Seperate the isolated list to active list and inactive list */
-	seperate_list(&l_hold, &l_active, &l_inactive, memcg);
-
-	move_pages_into_lru(lruvec, &l_active);
-	move_pages_into_lru(lruvec, &l_inactive);
-
-	mod_node_page_state(pgdat, NR_ISOLATED_ANON, -total_isolated);
-}
-
-static ssize_t mem_cgroup_aging_anon(struct kernfs_open_file *of,
-		char *buf, size_t nbytes, loff_t off)
-{
-	unsigned long lru_mask = 0;
-	struct lruvec *lruvec = NULL;
-	pg_data_t *pgdat = NODE_DATA(0);
-	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
-
-	if (kstrtoul(strstrip(buf), 0, &lru_mask))
-		return -EINVAL;
-
-	lruvec = mem_cgroup_lruvec(memcg, pgdat);
-	mem_cgroup_aging_anon_lruvec(memcg, lruvec, lru_mask, false);
-
-	return nbytes;
-}
-
 static int memcg_total_info_per_app_show(struct seq_file *m, void *v)
 {
 	struct mem_cgroup *memcg = NULL;
@@ -1063,7 +834,7 @@ static ssize_t mem_cgroup_name_write(struct kernfs_open_file *of, char *buf,
 	int len, w_len;
 
 	if (unlikely(hybp == NULL)) {
-		hybp = hybridswap_cache_alloc(memcg, false);
+		hybp = hybridswap_cache_alloc(memcg, false, false);
 		if (!hybp)
 			return -EINVAL;
 	}
@@ -1104,7 +875,7 @@ static int mem_cgroup_app_score_write(struct cgroup_subsys_state *css,
 	memcg = mem_cgroup_from_css(css);
 	hybs = MEMCGRP_ITEM_DATA(memcg);
 	if (!hybs) {
-		hybs = hybridswap_cache_alloc(memcg, false);
+		hybs = hybridswap_cache_alloc(memcg, false, false);
 		if (!hybs)
 			return -EINVAL;
 	}
@@ -1140,7 +911,7 @@ int mem_cgroup_app_uid_write(struct cgroup_subsys_state *css,
 	hybs = MEMCGRP_ITEM_DATA(memcg);
 
 	if (unlikely(hybs == NULL)) {
-		hybs = hybridswap_cache_alloc(memcg, false);
+		hybs = hybridswap_cache_alloc(memcg, false, false);
 		if (!hybs)
 			return -EINVAL;
 	}
@@ -1393,10 +1164,6 @@ static struct cftype mem_cgroup_hybridswap_legacy_files[] = {
 		.seq_show = memcg_total_info_per_app_show,
 	},
 	{
-		.name = "aging_anon",
-		.write = mem_cgroup_aging_anon,
-	},
-	{
 		.name = "swap_stat",
 		.seq_show = memcg_swap_stat_show,
 	},
@@ -1608,9 +1375,9 @@ int __init hybridswap_pre_init(void)
 	config = oplus_read_mm_config(module_name_ezreclaimd);
 	if (config)
 		ezreclaimd_enable = config->enable;
-	if (ezreclaimd_enable && ezr_read_symbols_address() == 0) {
+	if (ezreclaimd_enable) {
 		log_info("using ezreclaimd as reclaimer\n");
-		ezr_ops_init(hybridswapd_ops);
+		ezr_empty_ops_init(hybridswapd_ops);
 		goto pre_init;
 	}
 #endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE && CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD */

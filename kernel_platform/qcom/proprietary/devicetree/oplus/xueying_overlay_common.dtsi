@@ -194,7 +194,7 @@
         interrupt-parent = <&pm8550ve_f_gpios>;
         enable-gpios = <&pm8550ve_f_gpios 5 0>;
         irq-gpios = <&pm8550ve_f_gpios 6 0>;
-        status = "ok";
+        status = "disabled";
     };
 };
 

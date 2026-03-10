@@ -33,6 +33,7 @@ unsigned int g_ref_enable = 1;
 #endif
 struct kmem_cache *oplus_binder_struct_cachep = NULL;
 unsigned int g_sched_enable = 1;
+EXPORT_SYMBOL(g_sched_enable);
 unsigned long long g_sched_debug = 0;
 
 unsigned int g_async_ux_enable = 1;
@@ -43,7 +44,10 @@ static unsigned int sync_insert_queue = 1;
 static unsigned int async_ux_test = 0;
 static unsigned int allow_accumulate_ux = 1;
 int unset_async_ux_inrestore = 1;
-int get_random_binder_task = 1;
+int get_random_binder_task = 0;
+/* g_desired_select_task_num should <= MAX_SELECTED_TASK */
+int g_desired_select_task_num = DESIRED_SELECT_TASK_NUM;
+static int select_more_tasks = 1;
 
 static int insert_limit[NUM_INSERT_MAX] = {0};
 
@@ -57,6 +61,10 @@ unsigned int sync_use_t_vendordata = 0;
 static struct binder_proc *system_server_proc = NULL;
 static DEFINE_SPINLOCK(binder_ref_lock);
 #endif
+
+static void binder_ux_state_systrace(struct task_struct *from,
+	struct task_struct *target, int ux_state, int systrace_lvl,
+	struct binder_transaction *t, struct binder_proc *proc);
 
 #define trace_binder_debug(x...) \
 	do { \
@@ -79,6 +87,7 @@ void parse_dts_switch(void)
 {
 	struct device_node *np = NULL;
 	int ret;
+	int boost_task_enable = 0;
 
 	np = of_find_node_by_name(NULL, "oplus_sync_ipc");
 
@@ -93,6 +102,17 @@ void parse_dts_switch(void)
 	}
 
 	dynamic_switch = FEATURE_ENABLE;
+
+	np = of_find_node_by_name(NULL, "oplus_binder_sched");
+	if(np) {
+		ret = of_property_read_u32(np, "thread_full_boost_task", &boost_task_enable);
+		if(ret)
+			pr_info("oplus_binder_sched no 'thread_full_boost_task' prop");
+		else
+			get_random_binder_task = boost_task_enable;
+	} else {
+		pr_info("no oplus_binder_sched node");
+	}
 }
 
 static inline struct oplus_binder_struct *alloc_oplus_binder_struct(void)
@@ -216,6 +236,8 @@ void set_task_async_ux_enable(pid_t pid, int enable)
 	}
 	ots->binder_async_ux_enable = enable;
 
+	binder_ux_state_systrace(current, task, STATE_USER_SET_ASYNC_UX,
+		LOG_BINDER_SYSTRACE_LVL1, NULL, NULL);
 	trace_binder_set_get_ux(task, pid, enable, "set enable end");
 	oplus_binder_debug(LOG_SET_ASYNC_UX, "(set_pid=%d task_pid=%d comm=%s) enable=%d ux_sts=%d set enable end\n",
 		pid, task->pid, task->comm, ots->binder_async_ux_enable, ots->binder_async_ux_sts);
@@ -467,6 +489,19 @@ static inline bool is_sync_t_ux_state(struct binder_transaction *t,
 }
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+static inline bool is_sync_inherit_ux(struct binder_transaction *t)
+{
+	if (IS_ERR_OR_NULL(t) || IS_ERR_OR_NULL(t->from)
+		|| IS_ERR_OR_NULL(t->from->task)) {
+		return false;
+	}
+
+	if (test_set_inherit_ux(t->from->task) || test_task_is_rt(t->from->task)) {
+		return true;
+	} else {
+		return false;
+	}
+}
 
 static inline void sync_binder_set_inherit_ux(struct task_struct *thread_task, struct task_struct *from_task,
 	bool sync, bool is_servicemg, struct binder_transaction *t, struct binder_proc *proc)
@@ -536,12 +571,45 @@ static inline void sync_binder_set_inherit_ux(struct task_struct *thread_task, s
 	}
 }
 
+static int get_group_leader_ux_prio_value(struct task_struct *thread_task,
+	bool sf_async_ux)
+{
+	struct task_struct *group_leader = NULL;
+	struct oplus_task_struct *ots = NULL;
+	int default_ux_val = 0;
+	int ux_val = 0;
+
+	if (sf_async_ux)
+		default_ux_val = SA_TYPE_LIGHT;
+	else
+		default_ux_val = SA_TYPE_HEAVY;
+
+	if (!thread_task)
+		return default_ux_val;
+
+	group_leader = thread_task->group_leader;
+	if (!group_leader)
+		return default_ux_val;
+
+	ots = get_oplus_task_struct(group_leader);
+	if (IS_ERR_OR_NULL(ots))
+		return default_ux_val;
+	/*
+	ux_val = (ots->ux_state & SCHED_ASSIST_UX_PRIORITY_MASK) | default_ux_val;
+	*/
+	ux_val = default_ux_val;
+
+	return ux_val;
+}
+
 static inline void async_binder_set_inherit_ux(struct task_struct *thread_task,
 	struct task_struct *from_task, bool sync, struct binder_transaction *t, struct binder_proc *proc)
 {
 	struct oplus_task_struct *ots = NULL;
+	struct oplus_binder_struct *obs = NULL;
 	int type = 0;
 	int ux_value = 0;
+	bool sf_async_ux = false;
 
 	if (unlikely(!g_async_ux_enable)) {
 		return;
@@ -560,8 +628,6 @@ static inline void async_binder_set_inherit_ux(struct task_struct *thread_task,
 
 	ots = get_oplus_task_struct(thread_task);
 	if (unlikely(IS_ERR_OR_NULL(ots))) {
-		trace_binder_inherit_ux(from_task, thread_task, INVALID_VALUE, INVALID_VALUE,
-			type, INVALID_VALUE, sync, "async_set ots null");
 		return;
 	}
 
@@ -571,20 +637,33 @@ static inline void async_binder_set_inherit_ux(struct task_struct *thread_task,
 		return;
 	}
 
+	obs = get_oplus_binder_struct(t, false);
+	if (is_obs_valid(obs) == OBS_VALID && obs->sf_async_ux) {
+		sf_async_ux = true;
+		ux_value = get_group_leader_ux_prio_value(thread_task, true);
+	} else {
+		sf_async_ux = false;
+		ux_value = SA_TYPE_HEAVY;
+	}
+
 	trace_binder_inherit_ux(from_task, thread_task, ots->ux_depth, ots->ux_state,
 		type, ots->binder_async_ux_sts, sync, "async_set before set");
 
 	set_task_async_ux_sts(ots, true);
-	ux_value = (ots->ux_state | SA_TYPE_HEAVY);
+	ux_value = (ots->ux_state | ux_value);
 	set_inherit_ux(thread_task, INHERIT_UX_BINDER, ots->ux_depth, ux_value);
 
 	trace_binder_inherit_ux(from_task, thread_task, ots->ux_depth, ots->ux_state,
 		type, ots->binder_async_ux_sts, sync, "async_set after set");
 
-	oplus_binder_debug(LOG_SET_ASYNC_UX, "async_set_ux after set, thread(pid=%d tgid=%d comm=%s) ux_sts=%d ux_state=%d ux_depth=%d inherit_ux=%lld\n",
-		thread_task->pid, thread_task->tgid, thread_task->comm,
-		ots->binder_async_ux_sts, ots->ux_state, ots->ux_depth, atomic64_read(&ots->inherit_ux));
-	binder_ux_state_systrace(current, thread_task, STATE_ASYNC_SET_UX, LOG_BINDER_SYSTRACE_LVL0, t, proc);
+	oplus_binder_debug(LOG_SET_ASYNC_UX, "async_set_ux after set, thread(pid = %d tgid = %d comm = %s group = %s) sf = %d ux_value = 0x%x ux_state = 0x%x %d \
+		depth = %d inherit_ux = %lld\n",
+		thread_task->pid, thread_task->tgid, thread_task->comm, thread_task->group_leader->comm,
+		sf_async_ux, ux_value, ots->ux_state, ots->ux_state, ots->ux_depth, atomic64_read(&ots->inherit_ux));
+	if (sf_async_ux)
+		binder_ux_state_systrace(current, thread_task, STATE_SF_ASYNC_SET_UX, LOG_BINDER_SYSTRACE_LVL0, t, proc);
+	else
+		binder_ux_state_systrace(current, thread_task, STATE_ASYNC_SET_UX, LOG_BINDER_SYSTRACE_LVL0, t, proc);
 }
 
 static inline void binder_set_inherit_ux(struct task_struct *thread_task,
@@ -596,6 +675,14 @@ static inline void binder_set_inherit_ux(struct task_struct *thread_task,
 	} else {
 		async_binder_set_inherit_ux(thread_task, from_task, sync, t, proc);
 	}
+}
+
+/* only used in try_set_ux_when_no_thread(), don't know whether it is sync or async */
+static inline void binder_set_inherit_ux_directly(struct task_struct *thread_task,
+	struct task_struct *from_task, struct binder_transaction *t,
+	struct binder_proc *proc)
+{
+	async_binder_set_inherit_ux(thread_task, from_task, false, t, proc);
 }
 
 static inline void binder_unset_inherit_ux(struct task_struct *thread_task,
@@ -649,6 +736,11 @@ static inline void binder_unset_inherit_ux(struct task_struct *thread_task,
 }
 
 #else /* CONFIG_OPLUS_FEATURE_SCHED_ASSIST */
+static inline bool is_sync_inherit_ux(struct binder_transaction *t)
+{
+	return false;
+}
+
 static inline void binder_set_inherit_ux(struct task_struct *thread_task, struct task_struct *from_task,
 	bool sync, bool is_servicemg, struct binder_transaction *t, struct binder_proc *proc)
 {
@@ -664,9 +756,6 @@ static inline void binder_unset_inherit_ux(struct task_struct *thread_task,
 void android_vh_binder_restore_priority_handler(void *unused,
 	struct binder_transaction *t, struct task_struct *task)
 {
-	if (unlikely(!g_sched_enable))
-		return;
-
 	/* Google commit "d1367b5" caused this priority pass issue on our kernel-5.15 project */
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 15, 0))
 	if (t != NULL) {
@@ -678,19 +767,8 @@ void android_vh_binder_restore_priority_handler(void *unused,
 	}
 #endif
 
-	if (!is_task_servicemg(task)) {
+	if (unlikely(!g_sched_enable))
 		return;
-	}
-
-	if (t) {
-		trace_binder_ux_task(1, INVALID_VALUE, INVALID_VALUE, task,
-			INVALID_VALUE, t, NULL, "sync_ux unset binder_reply");
-		binder_unset_inherit_ux(task, SYNC_UNSET, t, NULL);
-	} else {
-		trace_binder_ux_task(1, INVALID_VALUE, INVALID_VALUE, task,
-			INVALID_VALUE, t, NULL, "sync_ux unset restore_prio t NULL");
-		binder_unset_inherit_ux(task, SYNC_OR_ASYNC_UNSET, t, NULL);
-	}
 }
 
 void android_vh_binder_wait_for_work_handler(void *unused,
@@ -795,6 +873,7 @@ static void android_vh_alloc_oem_binder_struct_handler(void *unused,
 	struct oplus_binder_struct *obs = NULL;
 	struct oplus_task_struct *ots = NULL;
 	int async_ux_enable = 0, test_debug = 0;
+	bool sf_async_ux = false;
 
 	if (unlikely(!g_sched_enable) || unlikely(!g_async_ux_enable)) {
 		return;
@@ -829,9 +908,10 @@ static void android_vh_alloc_oem_binder_struct_handler(void *unused,
 		return;
 	}
 
+	sf_async_ux = is_allow_sf_binder_ux(current);
 	if (ots->binder_async_ux_enable) {
 		async_ux_enable = ots->binder_async_ux_enable;
-	} else if (is_allow_sf_binder_ux(current)) {
+	} else if (sf_async_ux) {
 		async_ux_enable = 1;
 		binder_ux_state_systrace(current, target_proc ? target_proc->tsk : NULL,
 			STATE_SF_ASYNC_IS_UX, LOG_BINDER_SYSTRACE_LVL0, t, NULL);
@@ -841,6 +921,7 @@ static void android_vh_alloc_oem_binder_struct_handler(void *unused,
 		obs = get_oplus_binder_struct(t, true);
 		if (is_obs_valid(obs) == OBS_VALID) {
 			obs->async_ux_enable = async_ux_enable ? async_ux_enable : test_debug;
+			obs->sf_async_ux = sf_async_ux;
 			trace_binder_ux_enable(current, obs->async_ux_enable, t,
 				obs, "tr async_ux enable");
 		}
@@ -933,9 +1014,11 @@ static void set_binder_thread_node(struct binder_transaction *t,
 	}
 	ots = get_oplus_task_struct(task);
 	if (!IS_ERR_OR_NULL(ots)) {
-		oplus_binder_debug(LOG_TRACK_ASYNC_NODE, "before, thread(pid:%d tgid:%d comm:%s) sync:%d, reset:%d, ots_node:0x%llx, node:0x%llx t:%d\n",
-			task->pid, task->tgid, task->comm, sync, reset, (unsigned long long)ots->binder_thread_node,
-			(unsigned long long)node, t ? t->debug_id : 0);
+		oplus_binder_debug(LOG_TRACK_ASYNC_NODE, "before, thread(pid:%d tgid:%d comm:%s) sync:%d, reset:%d \
+			ots_node:[%d has_async:%d], node:[%d has_async:%d] t:%d\n",
+			task->pid, task->tgid, task->comm, sync, reset, ots->binder_thread_node ? ots->binder_thread_node->debug_id : 0,
+			ots->binder_thread_node ? ots->binder_thread_node->has_async_transaction : 0,
+			node ? node->debug_id : 0, node ? node->has_async_transaction : 0, t ? t->debug_id : 0);
 		if (reset) {
 			ots->binder_thread_node = NULL;
 			set_node = true;
@@ -945,9 +1028,11 @@ static void set_binder_thread_node(struct binder_transaction *t,
 			set_node = true;
 			trace_set_thread_node(task, node, sync, "async set");
 		}
-		oplus_binder_debug(LOG_TRACK_ASYNC_NODE, "after, thread(pid:%d tgid:%d comm:%s) sync:%d, reset:%d, ots_node:0x%llx, node:0x%llx, set_node:%d t:%d\n",
-			task->pid, task->tgid, task->comm, sync, reset, (unsigned long long)ots->binder_thread_node, (unsigned long long)node,
-			set_node,  t ? t->debug_id : 0);
+		oplus_binder_debug(LOG_TRACK_ASYNC_NODE, "after, thread(pid:%d tgid:%d comm:%s) sync:%d, reset:%d \
+			ots_node:[%d has_async:%d], node:[%d has_async:%d], set_node:%d t:%d\n",
+			task->pid, task->tgid, task->comm, sync, reset, ots->binder_thread_node ? ots->binder_thread_node->debug_id : 0,
+			ots->binder_thread_node ? ots->binder_thread_node->has_async_transaction : 0,
+			node ? node->debug_id : 0, node ? node->has_async_transaction : 0, set_node, t ? t->debug_id : 0);
 	} else {
 		trace_set_thread_node(task, NULL, sync, "ots null");
 	}
@@ -1013,9 +1098,10 @@ static void android_vh_free_oplus_binder_struct_handler(void *unused, struct bin
 {
 	struct oplus_binder_struct *obs = (struct oplus_binder_struct *)(t->android_vendor_data1);
 
-	if (unlikely(!g_sched_enable) || unlikely(!g_async_ux_enable)) {
+	if (unlikely(!g_async_ux_enable)) {
 		return;
 	}
+
 	if (binder_is_sync_mode(t->flags)) {
 		return;
 	}
@@ -1173,11 +1259,6 @@ static bool sync_mode_check_ux(struct binder_proc *proc,
 		return false;
 	}
 
-	if (is_task_servicemg(binder_proc_task)) {
-		binder_set_inherit_ux(binder_proc_task, current, sync, true, t, proc);
-		trace_binder_proc_thread(binder_proc_task, binder_th_task, sync, INVALID_VALUE, t, proc,
-			"sync_ux set servicemg");
-	}
 
 	if (!binder_th_task)
 		return false;
@@ -1188,18 +1269,24 @@ static bool sync_mode_check_ux(struct binder_proc *proc,
 	return set_ux;
 }
 
-#define CHECK_MAX_NODE_FOR_ASYNC_THREAD		400
+/* if get same node task fail, maybe in proc->todo list */
 static struct task_struct *get_same_node_task(struct binder_proc *proc,
-	struct binder_node *node, struct binder_transaction *t)
+	struct binder_transaction *t)
 {
 	struct binder_thread *thread = NULL;
 	struct task_struct *task = NULL;
 	struct task_struct *select_task = NULL;
 	struct oplus_task_struct *ots = NULL;
+	struct binder_node *node = NULL;
 	struct rb_node *n = NULL;
 	bool has_async = true;
 	int count = 0;
+	static unsigned int get_count = 0;
+	static unsigned int not_get_count = 0;
 
+	if (t && t->buffer) {
+		node = t->buffer->target_node;
+	}
 	if (!proc || !node) {
 		return NULL;
 	}
@@ -1220,8 +1307,8 @@ static struct task_struct *get_same_node_task(struct binder_proc *proc,
 		if (count > CHECK_MAX_NODE_FOR_ASYNC_THREAD) {
 			break;
 		}
-		if ((g_sched_debug & LOG_TRACK_LAST_ASYNC) && !IS_ERR_OR_NULL(ots) && task) {
-			oplus_binder_debug(LOG_TRACK_LAST_ASYNC, "get_same_node t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
+		if ((g_sched_debug & LOG_TRACK_SELECT_TASK) && !IS_ERR_OR_NULL(ots) && task) {
+			oplus_binder_debug(LOG_TRACK_SELECT_TASK, "get_same_node t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
 				max_threads:%d request:%d started:%d count:%d ots_node:%d node:%d\n",
 				t ? t->debug_id : 0, proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm, task->pid, task->tgid,
 				task->comm, proc->max_threads, proc->requested_threads, proc->requested_threads_started,
@@ -1230,14 +1317,19 @@ static struct task_struct *get_same_node_task(struct binder_proc *proc,
 	}
 
 end:
-	oplus_binder_debug(LOG_GET_LAST_ASYNC, "get_same_node end t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
-		max_threads:%d request:%d started:%d count:%d ots_node:%d node:%d, has_async:%d node get_result:%d\n",
+	if (g_sched_debug & LOG_GET_SELECT_TASK) {
+		if (select_task)
+			get_count++;
+		else
+			not_get_count++;
+	}
+	oplus_binder_debug(LOG_GET_SELECT_TASK, "get_same_node end t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
+		max_threads:%d request:%d started:%d count:%d node:%d, has_async:%d node get_result:%d get:%d, not_get:%d\n",
 		t ? t->debug_id : 0, proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm,
 		select_task ? task->pid : 0, select_task ? task->tgid : 0,
 		select_task ? task->comm : "null", proc->max_threads, proc->requested_threads,
-		proc->requested_threads_started, count,
-		(ots->binder_thread_node ? ots->binder_thread_node->debug_id : 0), node->debug_id,
-		has_async, select_task ? true : false);
+		proc->requested_threads_started, count, node->debug_id,
+		has_async, select_task ? true : false, get_count, not_get_count);
 
 	return select_task;
 }
@@ -1266,7 +1358,7 @@ static inline bool is_binder_thread(struct binder_proc *proc, struct task_struct
 	} else {
 		ret = false;
 	}
-	oplus_binder_debug(LOG_TRACK_LAST_ASYNC, "is_binder_thread:%d, proc_context:%d \
+	oplus_binder_debug(LOG_TRACK_SELECT_TASK, "is_binder_thread:%d, proc_context:%d \
 		proc(pid:%d comm:%s) task(pid:%d, tgid:%d comm:%s)\n", ret, proc_context,
 		proc->tsk->pid, proc->tsk->comm, task->pid, task->tgid, task->comm);
 
@@ -1279,51 +1371,59 @@ static inline bool is_binder_thread(struct binder_proc *proc, struct task_struct
 #define GET_STATE(t) (t->state)
 #endif
 
-/* get same node task fail, maybe in proc->todo list, not in thread, select one (not_rt && not_ux && running) binder task */
-static struct task_struct *get_proc_lowprio_binder_task(struct binder_proc *proc,
-	struct binder_node *node, struct binder_transaction *t)
+static int get_proc_lowprio_binder_task(struct binder_proc *proc,
+	struct binder_transaction *t, int get_type, bool sync,
+	struct task_struct **select_tasks, int desired_select_num)
 {
 	struct binder_thread *thread = NULL;
 	struct task_struct *task = NULL;
-	struct task_struct *select_task = NULL;
 	struct rb_node *n = NULL;
 	int ux_type = 0;
 	int binder_thread_count = 0;
-	static int ux_thread = 0;
-	static int not_ux_thread = 0;
-	static int proc_allthread_ux = 0;
-	static int proc_not_allthread_ux = 0;
-	static int not_ux_not_running = 0;
+	int thread_not_ux = 0;
 	bool allthread_is_ux = false;
-	bool has_async = true;
 	int count = 0;
+	int ux_rt_thread = 0;
+	int truly_select_num = 0;
+	static unsigned int ux_max_count = 0;
+	static unsigned int proc_allthread_ux = 0;
+	static unsigned int proc_not_allthread_ux = 0;
+	static unsigned int not_ux_not_running = 0;
+	static unsigned int sync_has_got = 0;
+	static unsigned int sync_not_get = 0;
+	static unsigned int async_has_got = 0;
+	static unsigned int async_not_get = 0;
+	static unsigned int all_get = 0;
+	static unsigned int all_not_get = 0;
+	static unsigned int truly_select_more = 0;
 
 	if (!get_random_binder_task) {
-		return NULL;
+		return 0;
 	}
 	if (!proc) {
-		return NULL;
+		return 0;
+	}
+	if (proc->max_threads <= 0 || proc->requested_threads_started <= 0) {
+		return 0;
+	}
+	if (desired_select_num > MAX_SELECTED_TASK) {
+		desired_select_num = MAX_SELECTED_TASK;
 	}
 
 	/* for debug */
-	if (g_sched_debug & LOG_TRACK_LAST_ASYNC) {
-		for (n = rb_first(&proc->threads); n != NULL; n = rb_next(n)) {
-			thread = rb_entry(n, struct binder_thread, rb_node);
-			task = thread->task;
-			if (is_binder_thread(proc, task)) {
-				ux_type = get_ux_state_type(task);
-				if (ux_type == UX_STATE_NONE) {
-					ux_thread++;
-				} else {
-					not_ux_thread++;
+	if (g_sched_debug & LOG_TRACK_SELECT_TASK) {
+		if (strncmp(proc->tsk->comm, SURFACEFLINGER_NAME, TASK_COMM_LEN)) {
+			for (n = rb_first(&proc->threads); n != NULL; n = rb_next(n)) {
+				thread = rb_entry(n, struct binder_thread, rb_node);
+				task = thread->task;
+				if (is_binder_thread(proc, task)) {
+					ux_type = get_ux_state_type(task);
+					if (ux_type == UX_STATE_NONE)
+						thread_not_ux++;
 				}
 			}
-			count++;
-			if (count > CHECK_MAX_NODE_FOR_ASYNC_THREAD) {
-				break;
-			}
 		}
-		if (not_ux_thread)
+		if (thread_not_ux)
 			proc_not_allthread_ux++;
 		else {
 			proc_allthread_ux++;
@@ -1331,33 +1431,65 @@ static struct task_struct *get_proc_lowprio_binder_task(struct binder_proc *proc
 		}
 	}
 
-	count = 0;
-	binder_thread_count = 0;
 	for (n = rb_first(&proc->threads); n != NULL; n = rb_next(n)) {
 		thread = rb_entry(n, struct binder_thread, rb_node);
 		task = thread->task;
 		if (is_binder_thread(proc, task)) {
+			if (test_task_ux(task) || test_task_is_rt(task)) {
+				ux_rt_thread++;
+			}
+			if (ux_rt_thread > MAX_UX_THREAD_FOR_SET_RANDOM) {
+				if (!truly_select_num) {
+					binder_ux_state_systrace(current, NULL, STATE_MAX_UX_FOR_SET_RANDOM,
+						LOG_BINDER_SYSTRACE_LVL0, NULL, proc);
+				}
+				if (g_sched_debug & LOG_GET_SELECT_TASK)
+					ux_max_count++;
+				goto end;
+			}
+			ux_type = get_ux_state_type(task);
 			if (ux_type == UX_STATE_NONE) {
 				if (GET_STATE(task) == TASK_RUNNING) {
-					select_task = task;
-					goto end;
-				} else if (g_sched_debug & LOG_GET_LAST_ASYNC) {
+					if (truly_select_num < desired_select_num) {
+						*(select_tasks + truly_select_num) = task;
+						truly_select_num++;
+					}
+					if (truly_select_num >= desired_select_num) {
+						goto end;
+					}
+				} else if (g_sched_debug & LOG_GET_SELECT_TASK) {
 					not_ux_not_running++;
 				}
 			}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
-			oplus_binder_debug(LOG_TRACK_LAST_ASYNC, "get_binder_task t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
-				max_threads:%d request:%d started:%d count:%d node_id:%d binder_thread_count:%d ux_type:%d ux_state:%d tsk_state:0x%x\n",
-				t ? t->debug_id : 0, proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm, task->pid, task->tgid, task->comm,
-				proc->max_threads, proc->requested_threads, proc->requested_threads_started,
-				count, node ? node->debug_id : 0, binder_thread_count, ux_type, oplus_get_ux_state(task), GET_STATE(task));
-#else
-			oplus_binder_debug(LOG_TRACK_LAST_ASYNC, "get_binder_task t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
-				max_threads:%d request:%d started:%d count:%d node_id:%d binder_thread_count:%d ux_type:%d ux_state:%d tsk_state:0x%lx\n",
-				t ? t->debug_id : 0, proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm, task->pid, task->tgid, task->comm,
-				proc->max_threads, proc->requested_threads, proc->requested_threads_started,
-				count, node ? node->debug_id : 0, binder_thread_count, ux_type, oplus_get_ux_state(task), GET_STATE(task));
+
+			if (g_sched_debug & LOG_GET_SELECT_TASK) {
+				struct oplus_task_struct *ots = get_oplus_task_struct(task);
+				int ots_ux_state = -1;
+				int ots_sub_ux_state = -1;
+				if (!IS_ERR_OR_NULL(ots)) {
+					ots_ux_state = ots->ux_state;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+					ots_sub_ux_state = ots->sub_ux_state;
 #endif
+				}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+				oplus_binder_debug(LOG_GET_SELECT_TASK, "get_binder_task t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
+					max_threads:%d request:%d started:%d count:%d binder_thread_count:%d \
+					ux_type:%d ux_state:0x%x ots_ux_state:0x%x ots_sub:0x%x tsk_state:0x%x prio:%d get_type:%d\n",
+					t ? t->debug_id : 0, proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm, task->pid, task->tgid, task->comm,
+					proc->max_threads, proc->requested_threads, proc->requested_threads_started,
+					count, binder_thread_count, ux_type, oplus_get_ux_state(task), ots_ux_state, ots_sub_ux_state,
+					GET_STATE(task), task->prio, get_type);
+#else
+				oplus_binder_debug(LOG_GET_SELECT_TASK, "get_binder_task t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
+					max_threads:%d request:%d started:%d count:%d binder_thread_count:%d \
+					ux_type:%d ux_state:0x%x ots_ux_state:0x%x ots_sub:0x%x tsk_state:0x%lx prio:%d get_type:%d\n",
+					t ? t->debug_id : 0, proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm, task->pid, task->tgid, task->comm,
+					proc->max_threads, proc->requested_threads, proc->requested_threads_started,
+					count, binder_thread_count, ux_type, oplus_get_ux_state(task), ots_ux_state, ots_sub_ux_state,
+					GET_STATE(task), task->prio, get_type);
+#endif
+			}
 			if (g_sched_debug & LOG_BINDER_SYSTRACE_LVL1) {
 				binder_ux_state_systrace(current, task, STATE_TASK_STRUCT_STATE + GET_STATE(task),
 					LOG_BINDER_SYSTRACE_LVL1, t, proc);
@@ -1367,11 +1499,6 @@ static struct task_struct *get_proc_lowprio_binder_task(struct binder_proc *proc
 				break;
 			}
 		}
-
-		if (node && (node->has_async_transaction == false)) {
-			has_async = false;
-			break;
-		}
 		count++;
 		if (count > CHECK_MAX_NODE_FOR_ASYNC_THREAD) {
 			break;
@@ -1379,83 +1506,50 @@ static struct task_struct *get_proc_lowprio_binder_task(struct binder_proc *proc
 	}
 
 end:
-	oplus_binder_debug(LOG_GET_LAST_ASYNC, "get_binder_task end t:%d proc(pid:%d tgid:%d comm:%s) task(pid:%d tgid:%d comm:%s) \
-		max_threads:%d request:%d started:%d count:%d node_id:%d binder_thread_count:%d ux_state:%d, has_async:%d ux_thread:%d \
-		not_ux_thread:%d proc_allthread_ux:%d proc_not_allthread_ux:%d allthread_is_ux:%d not_ux_not_running:%d task get_result:%d\n",
-		t ? t->debug_id : 0, proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm,
-		select_task ? task->pid : 0, select_task ? task->tgid : 0, select_task ? task->comm : "null",
-		proc->max_threads, proc->requested_threads, proc->requested_threads_started,
-		count, node ? node->debug_id : 0, binder_thread_count, oplus_get_ux_state(select_task), has_async,
-		ux_thread, not_ux_thread, proc_allthread_ux, proc_not_allthread_ux, allthread_is_ux, not_ux_not_running,
-		select_task ? true : false);
-
-	return select_task;
-}
-
-static struct task_struct *get_current_async_thread(struct binder_transaction *t, struct binder_proc *proc)
-{
-	struct task_struct *select_task = NULL;
-	struct binder_node *node = NULL;
-	ktime_t time = 0;
-	static int get_same_node = 0;
-	static int get_lowprio_binder = 0;
-	static int notget_lowprio_binder = 0;
-	static int get_task = 0;
-	static int not_get = 0;
-
-	if (unlikely(!g_set_last_async_ux)) {
-		return NULL;
-	}
-
-	if (t && t->buffer) {
-		node = t->buffer->target_node;
-	}
-	if (!node || !proc) {
-		return NULL;
-	}
-	if (g_sched_debug & LOG_GET_LAST_ASYNC) {
-		time = ktime_get();
-	}
-
-	select_task = get_same_node_task(proc, node, t);
-	if (select_task) {
-		if (g_sched_debug & LOG_GET_LAST_ASYNC) {
-			get_same_node++;
+	if (g_sched_debug & LOG_GET_SELECT_TASK) {
+		if (truly_select_num) {
+			int i;
+			for (i = 0; i < truly_select_num; i++) {
+				task = *(select_tasks + i);
+				oplus_binder_debug(LOG_GET_SELECT_TASK, "get_binder_task end t:%d, task[%d]:(pid:%d tgid:%d comm:%s) \
+					ux_state:%d truly_select_num:%d\n",
+					t ? t->debug_id : 0, i, task ? task->pid : 0, task ? task->tgid : 0,
+					task ? task->comm : "null", oplus_get_ux_state(task), truly_select_num);
+				all_get++;
+				if (sync)
+					sync_has_got++;
+				else
+					async_has_got++;
+			}
+		} else {
+			all_not_get++;
+			if (sync)
+				sync_not_get++;
+			else
+				async_not_get++;
 		}
-		goto end;
+		if (truly_select_num > g_desired_select_task_num)
+			truly_select_more++;
 	}
-	select_task = get_proc_lowprio_binder_task(proc, node, t);
-	if (g_sched_debug & LOG_GET_LAST_ASYNC) {
-		if (select_task)
-			get_lowprio_binder++;
-		else
-			notget_lowprio_binder++;	/* maybe all rt /all ux / no binder thread / not running / has_async false  */
-	}
+	oplus_binder_debug(LOG_GET_SELECT_TASK, "get_binder_task end  t:%d sync:%d proc(pid:%d tgid:%d comm:%s) \
+		task(pid:%d tgid:%d comm:%s) max_threads:%d request:%d started:%d count:%d binder_thread_count:%d \
+		thread_not_ux:%d proc_allthread_ux:%d proc_not_allthread_ux:%d allthread_is_ux:%d not_ux_not_running:%d \
+		ux_type:%d ux_rt_thread:%d desired_select_num:%d, truly_select_num:%d select_more:%d ux_max_count:%d \
+		task get_result:%d get_type:%d sync[get:%d not_get:%d] async[get:%d not_get:%d] all[get:%d not_get:%d]\n",
+		t ? t->debug_id : 0, sync, proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm,
+		task ? task->pid : 0, task ? task->tgid : 0, task ? task->comm : "null",
+		proc->max_threads, proc->requested_threads, proc->requested_threads_started,
+		count, binder_thread_count, thread_not_ux, proc_allthread_ux, proc_not_allthread_ux,
+		allthread_is_ux, not_ux_not_running, ux_type, ux_rt_thread, desired_select_num, truly_select_num,
+		truly_select_more, ux_max_count, truly_select_num ? true : false, get_type, sync_has_got,
+		sync_not_get, async_has_got, async_not_get, all_get, all_not_get);
 
-end:
-	if (g_sched_debug & LOG_GET_LAST_ASYNC) {
-		time = ktime_get() - time;
-		if (select_task)
-			get_task++;
-		else
-			not_get++;
-	}
-	oplus_binder_debug(LOG_GET_LAST_ASYNC, "t:%d current(pid:%d tgid:%d comm:%s) proc(pid:%d tgid:%d comm:%s) \
-		task(pid:%d tgid:%d comm:%s) max_threads:%d request:%d started:%d node:%d get_same_node:%d \
-		get_lowprio_binder:%d notget_lowprio_binder:%d time:%lldns final get_result:%d get_task:%d not_get:%d\n",
-		t ? t->debug_id : 0, current->pid, current->tgid, current->comm,
-		proc->tsk->pid, proc->tsk->tgid, proc->tsk->comm,
-		select_task ? select_task->pid : 0, select_task ? select_task->tgid : 0,
-		select_task ? select_task->comm : "null", proc->max_threads, proc->requested_threads,
-		proc->requested_threads_started, node->debug_id, get_same_node, get_lowprio_binder,
-		notget_lowprio_binder, time, select_task ? true : false, get_task, not_get);
-
-	return select_task;
+	return truly_select_num;
 }
 
 static bool async_mode_check_ux(struct binder_proc *proc, struct binder_transaction *t,
 		struct task_struct *binder_th_task, bool sync, bool pending_async,
-		struct task_struct **last_task, bool *force_sync)
+		struct task_struct **last_task, bool *force_sync, bool *async_need_select)
 {
 	struct oplus_binder_struct *obs = NULL;
 	struct task_struct *ux_task = binder_th_task;
@@ -1496,22 +1590,21 @@ static bool async_mode_check_ux(struct binder_proc *proc, struct binder_transact
 
 	/* pending_async, no binder_th_task */
 	if (pending_async) {
-		ux_task = get_current_async_thread(t, proc);
+		ux_task = get_same_node_task(proc, t);
 		if (ux_task) {
 			*last_task = ux_task;
 			set_ux = true;
 			binder_ux_state_systrace(current, ux_task, STATE_ASYNC_SET_LAST_UX, LOG_BINDER_SYSTRACE_LVL0, t, proc);
 		} else {
 			set_ux = false;
+			*async_need_select = true;
 			binder_ux_state_systrace(current, NULL, STATE_ASYNC_NOT_SET_LAST_UX, LOG_BINDER_SYSTRACE_LVL0, t, proc);
 		}
 		obs->pending_async = true;
-		trace_binder_ux_task(sync, pending_async, set_ux, ux_task, obs->async_ux_enable,
-			t, obs, "async_ux set last");
 		goto end;
 	} else {
+		*async_need_select = true;
 		obs->async_ux_no_thread = true;
-		binder_ux_state_systrace(current, NULL, STATE_ASYNC_NO_THREAD_NO_PENDING, LOG_BINDER_SYSTRACE_LVL0, t, proc);
 	}
 end:
 	trace_binder_ux_task(sync, pending_async, set_ux, ux_task, INVALID_VALUE,
@@ -1530,11 +1623,16 @@ static bool sync_mode_check_ux(struct binder_proc *proc,
 
 static bool async_mode_check_ux(struct binder_proc *proc, struct binder_transaction *t,
 	struct task_struct *binder_th_task, bool sync, bool pending_async,
-	struct task_struct **last_task, bool *force_sync)
+	struct task_struct **last_task, bool *force_sync, bool *async_need_select)
 {
 	return false;
 }
 
+static struct task_struct *get_proc_lowprio_binder_task(struct binder_proc *proc,
+	struct binder_transaction *t, int get_type, bool sync, int desired_select_num)
+{
+	return NULL;
+}
 #endif
 
 static void android_vh_binder_set_priority_handler(void *unused,
@@ -1544,7 +1642,7 @@ static void android_vh_binder_set_priority_handler(void *unused,
 	struct oplus_task_struct *ots = NULL;
 	bool current_is_client = false;
 
-	if (!g_set_async_ux_after_pending) {
+	if (unlikely(!g_sched_enable) || !g_set_async_ux_after_pending) {
 		return;
 	}
 	if (IS_ERR_OR_NULL(t) || IS_ERR_OR_NULL(task)) {
@@ -1595,12 +1693,109 @@ static void android_vh_binder_set_priority_handler(void *unused,
 		task->pid, task->tgid, task->comm, obs->pending_async, obs->async_ux_no_thread);
 }
 
+static bool need_select_more_tasks(struct binder_transaction *t,
+	struct task_struct *from_task)
+{
+	struct task_struct *group_leader = NULL;
+
+	if (!select_more_tasks)
+		return false;
+
+	if (!from_task)
+		return false;
+
+	group_leader = from_task->group_leader;
+	if (IS_ERR_OR_NULL(group_leader))
+		return false;
+	if (strncmp(group_leader->comm, SURFACEFLINGER_NAME, TASK_COMM_LEN))
+		return false;
+	if (strncmp(from_task->comm, SF_BCKGRNDEXEC_THREAD_NAME, TASK_COMM_LEN))
+		return false;
+	else
+		return true;
+}
+
+static void try_set_ux_when_no_thread(struct binder_proc *proc,
+	struct binder_transaction *t, struct task_struct *thread_task,
+	bool set_ux, bool sync, bool async_need_select)
+{
+	struct task_struct *select_tasks[MAX_SELECTED_TASK] = {0};
+	struct task_struct *task = NULL;
+	int desired_select_num = g_desired_select_task_num;
+	int truly_select_num = 0;
+	int i;
+
+	if (!get_random_binder_task)
+		return;
+
+	if (set_ux || thread_task || !proc)
+		return;
+	if (proc->max_threads <= 0
+		|| proc->requested_threads_started <= 0 || !proc->tsk)
+		return;
+
+	if (sync && !is_sync_inherit_ux(t))
+		return;
+	if (!sync && !async_need_select)
+		return;
+
+	if (need_select_more_tasks(t, current)) {
+		desired_select_num += select_more_tasks;
+	}
+	truly_select_num = get_proc_lowprio_binder_task(proc, t,
+		GET_TASK_WHEN_SYNC_NO_THREAD, sync, select_tasks, desired_select_num);
+	if (truly_select_num) {
+		for (i = 0; i < truly_select_num; i++) {
+			task = *(select_tasks + i);
+			if (!IS_ERR_OR_NULL(task)) {
+				binder_ux_state_systrace(current, task,
+					STATE_SET_RANDOM_UX_NO_THREAD, LOG_BINDER_SYSTRACE_LVL0, t, proc);
+				binder_set_inherit_ux_directly(task, current, t, proc);
+			} else {
+				binder_ux_state_systrace(current, proc->tsk,
+					STATE_NOT_SET_NO_THREAD_ERR, LOG_BINDER_SYSTRACE_LVL0, t, proc);
+			}
+		}
+	} else {
+		binder_ux_state_systrace(current, proc->tsk,
+			STATE_NOT_SET_NO_THREAD, LOG_BINDER_SYSTRACE_LVL0, t, proc);
+	}
+}
+
+static int set_servicemg_static_ux(struct binder_transaction *t,
+	struct binder_proc *proc, bool sync)
+{
+	struct task_struct *task = NULL;
+	int ux_type = 0;
+
+	if (!proc || !proc->tsk || !sync)
+		return TASK_NOT_SERVICEMG;
+
+	task = proc->tsk;
+	if (!is_task_servicemg(task)) {
+		return TASK_NOT_SERVICEMG;
+	}
+
+	ux_type = get_ux_state_type(task);
+	if (ux_type != UX_STATE_NONE) {
+		binder_ux_state_systrace(current, task, STATE_SERVICEMG_WAS_UX,
+				LOG_BINDER_SYSTRACE_LVL1, t, proc);
+		return SERVICEMG_WAS_UX;
+	}
+	binder_ux_state_systrace(current, task, STATE_SET_SERVICEMG_UX,
+			LOG_BINDER_SYSTRACE_LVL0, t, proc);
+	oplus_set_ux_state_lock(task, SA_TYPE_LIGHT, -1, true);
+
+	return SET_SERVICEMG_UX;
+}
+
 static void android_vh_binder_proc_transaction_finish_handler(void *unused, struct binder_proc *proc,
 		struct binder_transaction *t, struct task_struct *binder_th_task, bool pending_async, bool sync)
 {
 	struct task_struct *last_task = NULL;
 	bool set_ux = false;
 	bool force_sync = false;
+	bool async_need_select = false;
 
 	if (unlikely(!g_sched_enable))
 		return;
@@ -1615,11 +1810,15 @@ static void android_vh_binder_proc_transaction_finish_handler(void *unused, stru
 
 	set_binder_thread_node(t, binder_th_task, NULL, sync, false);
 
+	if (set_servicemg_static_ux(t, proc, sync) != TASK_NOT_SERVICEMG) {
+		return;
+	}
+
 	if (sync) {
 		set_ux = sync_mode_check_ux(proc, t, binder_th_task, sync);
 	} else {
 		set_ux = async_mode_check_ux(proc, t, binder_th_task, sync,
-			pending_async, &last_task, &force_sync);
+			pending_async, &last_task, &force_sync, &async_need_select);
 	}
 	if (set_ux) {
 		if (force_sync) {
@@ -1630,6 +1829,8 @@ static void android_vh_binder_proc_transaction_finish_handler(void *unused, stru
 			binder_set_inherit_ux(binder_th_task, current, sync, false, t, proc);
 		}
 	}
+
+	try_set_ux_when_no_thread(proc, t, binder_th_task, set_ux, sync, async_need_select);
 
 	if (last_task) {
 		trace_binder_ux_task(sync, pending_async, set_ux, last_task,
@@ -1848,4 +2049,5 @@ module_param_named(binder_allow_accumulate_ux, allow_accumulate_ux, int, 0664);
 module_param_named(binder_sync_use_t_vendordata, sync_use_t_vendordata, int, 0664);
 module_param_named(binder_unset_async_ux_inrestore, unset_async_ux_inrestore, int, 0664);
 module_param_named(get_random_binder_task, get_random_binder_task, int, 0664);
-
+module_param_named(g_desired_select_task_num, g_desired_select_task_num, int, 0664);
+module_param_named(select_more_tasks, select_more_tasks, int, 0664);

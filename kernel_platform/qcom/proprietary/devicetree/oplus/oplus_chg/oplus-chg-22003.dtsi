@@ -214,6 +214,9 @@
 		track,voocphy_type = <3>;
 		track,wired_max_power = <67000>;
 		track,wired_fast_chg_scheme = <3>;
+
+		track,gauge_status_ctrl;
+		track,external_gauge_num = <2>;
 	};
 
 	oplus_battery_log: oplus,battery_log {
@@ -364,6 +367,11 @@
 		reg = <0x55>;
 		qcom,modify-soc-smooth;
 		oplus,capacity-pct = <69>;
+
+		zy,gauge-check-model;
+		battery_params {
+			sino_default_cell_model = /bits/ 16 <60 59 55 60 67 47 54 51 52 62 71 67 110 496 5612>;
+		};
 	};
 
 	sc8547-charger-slave@6F{
@@ -422,6 +430,11 @@
 		qcom,modify-soc-smooth;
 		qcom,gauge_num = <1>;
 		oplus,capacity-pct = <31>;
+
+		zy,gauge-check-model;
+		battery_params {
+			sino_default_cell_model = /bits/ 16 <122 116 113 129 180 117 130 117 119 138 169 222 293 636 4967>;
+		};
 	};
 };
 
@@ -447,6 +460,9 @@
 	qcom,smart_charging_screenoff;
 	qcom,support_3p6_standard;
 	qcom,voocphy_support = <3>;
+	oplus,full_limit_curr_support;
+	oplus,fcl_index = <0>;
+	oplus,vb_offset = <40>;
 	qcom,input_current_charger_ma = <2000>;
 	qcom,pd_input_current_charger_ma = <2000>;
 	qcom,qc_input_current_charger_ma = <2000>;

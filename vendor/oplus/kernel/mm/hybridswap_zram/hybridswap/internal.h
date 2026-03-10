@@ -385,6 +385,7 @@ typedef struct mem_cgroup_hybridswap {
 	bool in_swapin;
 	bool force_swapout;
 #endif
+	bool css_alloc;
 }memcg_hybs_t;
 
 #define MEMCGRP_ITEM_DATA(memcg) ((memcg_hybs_t *)(memcg)->android_oem_data1[0])
@@ -508,7 +509,7 @@ bool hybridswap_reach_life_protect(void);
 struct workqueue_struct *hybridswap_get_reclaim_workqueue(void);
 extern struct mem_cgroup *get_next_memcg(struct mem_cgroup *prev);
 extern void get_next_memcg_break(struct mem_cgroup *prev);
-extern memcg_hybs_t *hybridswap_cache_alloc(struct mem_cgroup *memcg, bool atomic);
+extern memcg_hybs_t *hybridswap_cache_alloc(struct mem_cgroup *memcg, bool atomic, bool css_alloc);
 extern void memcg_app_score_resort(void);
 extern unsigned long memcg_anon_pages(struct mem_cgroup *memcg);
 
@@ -602,7 +603,6 @@ extern void hybridswapd_ops_init(struct hybridswapd_operations *ops);
 inline u64 get_zram_wm_ratio_value(void);
 void update_swapd_memcg_param(struct mem_cgroup *memcg);
 bool free_zram_is_ok(void);
-extern atomic_t ezreclaimable_nr;
 #else
 static inline bool hybridswap_swapd_enabled(void) { return false; }
 #endif
@@ -614,9 +614,9 @@ extern atomic_t display_off;
 extern struct zram *swapd_zram;
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE) && IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD)
-extern void ezr_ops_init(struct hybridswapd_operations *ops);
+extern void ezr_empty_ops_init(struct hybridswapd_operations *ops);
 extern bool ezreclaimd_enable;
-extern int __nocfi ezr_read_symbols_address(void);
+extern int ezr_nr_pages(void);
 #endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE && CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD */
 
 void register_panel_event_notifier(void);
