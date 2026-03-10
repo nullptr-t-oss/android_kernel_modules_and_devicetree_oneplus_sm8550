@@ -35,5 +35,19 @@ LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
 BOARD_VENDOR_KERNEL_MODULES += $(LOCAL_MODULE_PATH)/$(LOCAL_MODULE)
 include $(DLKM_DIR)/Build_external_kernelmodule.mk
 
+#ifdef OPLUS_SYNC_FENCE
+ifeq ($(OPLUS_VND_BUILD_PLATFORM), SM8550)
+include $(CLEAR_VARS)
+LOCAL_SRC_FILES           := $(wildcard $(LOCAL_PATH)/**/*) $(wildcard $(LOCAL_PATH)/*)
+LOCAL_MODULE              := oplus_sync_fence.ko
+LOCAL_MODULE_KBUILD_NAME  := oplus_sync_fence.ko
+LOCAL_MODULE_TAGS         := optional
+LOCAL_MODULE_DEBUG_ENABLE := true
+LOCAL_MODULE_PATH         := $(KERNEL_MODULES_OUT)
+BOARD_VENDOR_KERNEL_MODULES += $(LOCAL_MODULE_PATH)/$(LOCAL_MODULE)
+include $(DLKM_DIR)/Build_external_kernelmodule.mk
+endif
+#endif
+
 endif # DLKM check
 endif # KGSL_ENABLED

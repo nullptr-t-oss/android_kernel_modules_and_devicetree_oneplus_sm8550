@@ -31,6 +31,8 @@
 #include "sa_group.h"
 #endif
 
+#include <trace/hooks/block.h>
+
 #define HI_MASK		0xFF00000000000000UL
 #define HI_FLAG		0xAB00000000000000UL
 
@@ -132,6 +134,8 @@ static int register_scheduler_vendor_hooks(void)
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
 	oplus_loadbalance_init();
 #endif
+
+	REGISTER_TRACE_VH(android_vh_blk_rq_ctx_init, android_vh_blk_rq_ctx_init_handler);
 
 	return 0;
 }

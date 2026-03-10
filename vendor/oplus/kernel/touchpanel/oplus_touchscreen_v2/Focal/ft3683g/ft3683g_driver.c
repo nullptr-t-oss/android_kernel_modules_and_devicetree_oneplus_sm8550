@@ -149,6 +149,7 @@ static int fts_hw_reset(struct chip_data_ft3683g *ts_data, u32 delayms);
 #define SPI_HEADER_LENGTH           6   /*CRC*/
 static void fts_get_rawdata_snr(struct chip_data_ft3683g *ts_data);
 static void fts_rate_white_list_ctrl(void *chip_data, int value);
+static int fts_reset(void *chip_data);
 
 /* spi interface */
 static int fts_spi_transfer(struct spi_device *spi, u8 *tx_buf, u8 *rx_buf, u32 len)
@@ -2657,7 +2658,7 @@ static int fts_mode_switch(void *chip_data, work_mode mode, int flag)
 
 		if (ts_data->ts->is_suspended) {                             /* do not pull up reset when doing resume*/
 			if (ts_data->is_ic_sleep == true) {
-				fts_hw_reset(ts_data, RESET_TO_NORMAL_TIME);
+				fts_reset(ts_data);
 			}
 		}
 
