@@ -912,14 +912,14 @@ unsigned int ux_task_exec_limit(struct task_struct *p)
 		return exec_limit;
 	}
 
-	if (ux_state & SA_TYPE_SWIFT)
+	if (ux_state & SA_TYPE_HEAVY)
+		exec_limit *= 25;
+	else if (ux_state & SA_TYPE_SWIFT)
 		exec_limit *= 2;
 	else if (ux_state & SA_TYPE_ANIMATOR)
 		exec_limit *= 12;
 	else if (ux_state & SA_TYPE_LIGHT)
 		exec_limit *= 3;
-	else if (ux_state & SA_TYPE_HEAVY)
-		exec_limit *= 25;
 	else if (ux_state & SA_TYPE_LISTPICK)
 		exec_limit *= 30;
 
@@ -1949,3 +1949,10 @@ void android_vh_reweight_entity_handler(void *unused, struct sched_entity *se)
 	}
 }
 #endif
+
+void android_vh_blk_rq_ctx_init_handler(void *unused, struct request *rq, struct blk_mq_tags *tags, struct blk_mq_alloc_data *data, u64 alloc_time_ns)
+{
+	if (test_task_ux(current) && (IOPRIO_PRIO_CLASS(rq->ioprio) != IOPRIO_CLASS_RT)) {
+		rq->ioprio =  IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 4);
+	}
+}

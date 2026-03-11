@@ -29,14 +29,6 @@ source "drivers/soc/oplus/dfr/qcom/dump_reason/Kconfig"
 source "drivers/soc/oplus/dfr/qcom/oplus_ordump/Kconfig"
 #endif /* OPLUS_FEATURE_FULLDUMP_BACK */
 
-#ifdef OPLUS_FEATURE_MTK_FORCE_SHUTDOWN
-source "drivers/soc/oplus/dfr/mtk/mtk_shutdown_reboot/Kconfig"
-#endif /* OPLUS_FEATURE_MTK_FORCE_SHUTDOWN */
-
-#ifdef OPLUS_FEATURE_PMIC_MONITOR_MTK
-source "drivers/soc/oplus/dfr/mtk/oplus_pmic_monitor_mtk/Kconfig"
-#endif /* OPLUS_FEATURE_PMIC_MONITOR_MTK */
-
 #ifdef OPLUS_FEATURE_SHUTDOWN_DETECT
 source "drivers/soc/oplus/dfr/common/shutdown_detect/Kconfig"
 #endif /* OPLUS_FEATURE_SHUTDOWN_DETECT */
