@@ -25912,70 +25912,6 @@ int wlan_hdd_change_hw_mode_for_given_chnl(struct hdd_adapter *adapter,
 }
 
 #ifdef FEATURE_MONITOR_MODE_SUPPORT
-/**
- * wlan_hdd_cfg80211_get_channel() - Report current operating channel
- * @wiphy: wiphy handle
- * @wdev: wireless_dev handle
- * @chandef: output channel definition
- *
- * Required by nl80211 (NL80211_CMD_GET_INTERFACE) and wext (SIOCGIWFREQ)
- * so that tools like aireplay-ng / mdk3 can determine the current channel.
- *
- * Return: 0 on success, -ENODATA if no channel is set.
- */
-static int wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
-					 struct wireless_dev *wdev,
-					 struct cfg80211_chan_def *chandef)
-{
-	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(wdev->netdev);
-	struct hdd_station_ctx *sta_ctx;
-	struct hdd_mon_set_ch_info *ch_info;
-	struct ieee80211_channel *chan;
-	uint32_t freq;
-
-	if (!adapter)
-		return -ENODATA;
-
-	/* Primary source: adapter->mon_chan_freq (set by both boot-time
-	 * monitor mode and cfg80211 set_monitor_channel).
-	 */
-	freq = adapter->mon_chan_freq;
-
-	/* Fallback: station context ch_info (set by hdd_mon_select_cbmode
-	 * in the roam callback path).
-	 */
-	if (!freq) {
-		sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
-		ch_info = &sta_ctx->ch_info;
-		freq = ch_info->freq;
-	}
-
-	if (!freq)
-		return -ENODATA;
-
-	chan = ieee80211_get_channel(wiphy, freq);
-	if (!chan)
-		return -ENODATA;
-
-	cfg80211_chandef_create(chandef, chan, NL80211_CHAN_NO_HT);
-
-	/* Upgrade width if we know the bandwidth */
-	switch (adapter->mon_bandwidth) {
-	case CH_WIDTH_40MHZ:
-		chandef->width = NL80211_CHAN_WIDTH_40;
-		break;
-	case CH_WIDTH_80MHZ:
-		chandef->width = NL80211_CHAN_WIDTH_80;
-		break;
-	case CH_WIDTH_160MHZ:
-		chandef->width = NL80211_CHAN_WIDTH_160;
-		break;
-	default:
-		break;
-	}
-
-	return 0;
-}
 
 /**
  * __wlan_hdd_cfg80211_set_mon_ch() - Set monitor mode capture channel
@@ -27299,7 +27235,10 @@ static int __wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
  * @link_id: Channel link ID
  * @chandef: Pointer to channel definition
  *
- * Return: 0 for success, non zero for failure
+ * Required by nl80211 (NL80211_CMD_GET_INTERFACE) and wext (SIOCGIWFREQ)
+ * so that tools like aireplay-ng / mdk3 can determine the current channel.
+ *
+ * Return: 0 on success, -ENODATA if no channel is set.
  */
 #ifdef CFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT
 static int wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
@@ -27307,9 +27246,56 @@ static int wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
 					 unsigned int link_id,
 					 struct cfg80211_chan_def *chandef)
 {
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(wdev->netdev);
+	struct hdd_station_ctx *sta_ctx;
+	struct hdd_mon_set_ch_info *ch_info;
+	struct ieee80211_channel *chan;
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
+	uint32_t freq;
 
+	if (!adapter)
+		return -ENODATA;
+
+	/* --- LOGIC FOR MONITOR MODE --- */
+	if (adapter->device_mode == QDF_MONITOR_MODE) {
+		/* Primary source: mon_chan_freq */
+		freq = adapter->mon_chan_freq;
+
+		/* Fallback: station context ch_info */
+		if (!freq) {
+			sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+			ch_info = &sta_ctx->ch_info;
+			freq = ch_info->freq;
+		}
+
+		if (!freq)
+			return -ENODATA;
+
+		chan = ieee80211_get_channel(wiphy, freq);
+		if (!chan)
+			return -ENODATA;
+
+		cfg80211_chandef_create(chandef, chan, NL80211_CHAN_NO_HT);
+
+		/* Upgrade width if we know the bandwidth */
+		switch (adapter->mon_bandwidth) {
+		case CH_WIDTH_40MHZ:
+			chandef->width = NL80211_CHAN_WIDTH_40;
+			break;
+		case CH_WIDTH_80MHZ:
+			chandef->width = NL80211_CHAN_WIDTH_80;
+			break;
+		case CH_WIDTH_160MHZ:
+			chandef->width = NL80211_CHAN_WIDTH_160;
+			break;
+		default:
+			break;
+		}
+		return 0;
+	}
+
+	/* --- LOGIC FOR NORMAL MODES (Station, SAP, etc.) --- */
 	errno = osif_vdev_sync_op_start(wdev->netdev, &vdev_sync);
 	if (errno)
 		return errno;
@@ -27325,10 +27311,58 @@ static int wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
 					 struct wireless_dev *wdev,
 					 struct cfg80211_chan_def *chandef)
 {
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(wdev->netdev);
+	struct hdd_station_ctx *sta_ctx;
+	struct hdd_mon_set_ch_info *ch_info;
+	struct ieee80211_channel *chan;
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
 	/* Legacy purposes */
 	int link_id = -1;
+	uint32_t freq;
+
+	if (!adapter)
+		return -ENODATA;
+
+	/* --- LOGIC FOR MONITOR MODE --- */
+	if (adapter->device_mode == QDF_MONITOR_MODE) {
+		/* Primary source: mon_chan_freq */
+		freq = adapter->mon_chan_freq;
+
+		/* Fallback: station context ch_info */
+		if (!freq) {
+			sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+			ch_info = &sta_ctx->ch_info;
+			freq = ch_info->freq;
+		}
+
+		if (!freq)
+			return -ENODATA;
+
+		chan = ieee80211_get_channel(wiphy, freq);
+		if (!chan)
+			return -ENODATA;
+
+		cfg80211_chandef_create(chandef, chan, NL80211_CHAN_NO_HT);
+
+		/* Upgrade width if we know the bandwidth */
+		switch (adapter->mon_bandwidth) {
+		case CH_WIDTH_40MHZ:
+			chandef->width = NL80211_CHAN_WIDTH_40;
+			break;
+		case CH_WIDTH_80MHZ:
+			chandef->width = NL80211_CHAN_WIDTH_80;
+			break;
+		case CH_WIDTH_160MHZ:
+			chandef->width = NL80211_CHAN_WIDTH_160;
+			break;
+		default:
+			break;
+		}
+		return 0;
+	}
+
+	/* --- LOGIC FOR NORMAL MODES (Station, SAP, etc.) --- */
 
 	errno = osif_vdev_sync_op_start(wdev->netdev, &vdev_sync);
 	if (errno)
