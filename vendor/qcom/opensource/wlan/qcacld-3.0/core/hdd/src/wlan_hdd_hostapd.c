@@ -7703,9 +7703,9 @@ wlan_util_get_chan_def(struct wireless_dev *wdev, unsigned int link_id)
 }
 
 static inline struct ieee80211_channel
-wlan_util_get_chan(struct wireless_dev *wdev, unsigned int link_id)
+*wlan_util_get_chan(struct wireless_dev *wdev, unsigned int link_id)
 {
-	return *wdev->links[link_id].ap.chandef.chan;
+	return wdev->links[link_id].ap.chandef.chan;
 }
 #else
 static inline struct cfg80211_chan_def
@@ -7715,9 +7715,9 @@ wlan_util_get_chan_def(struct wireless_dev *wdev, unsigned int link_id)
 }
 
 static inline struct ieee80211_channel
-wlan_util_get_chan(struct wireless_dev *wdev, unsigned int link_id)
+*wlan_util_get_chan(struct wireless_dev *wdev, unsigned int link_id)
 {
-	return *wdev->chandef.chan;
+	return wdev->chandef.chan;
 }
 
 static inline uint32_t
