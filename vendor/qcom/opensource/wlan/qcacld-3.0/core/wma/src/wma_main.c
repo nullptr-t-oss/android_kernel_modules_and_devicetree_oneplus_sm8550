@@ -3903,7 +3903,7 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 	/* Initialize frame injection queue */
 	qdf_status = wma_init_injection_queue(wma_handle);
 	if (qdf_status != QDF_STATUS_SUCCESS) {
-		WMA_LOGE("%s: Failed to initialize injection queue: %d",
+		wma_err("%s: Failed to initialize injection queue: %d",
 			 __func__, qdf_status);
 		/* Continue initialization - injection queue failure is not fatal */
 	}
@@ -4986,7 +4986,7 @@ QDF_STATUS wma_close(void)
 	/* Deinitialize frame injection queue */
 	qdf_status = wma_deinit_injection_queue(wma_handle);
 	if (qdf_status != QDF_STATUS_SUCCESS) {
-		WMA_LOGE("%s: Failed to deinitialize injection queue: %d",
+		wma_err("%s: Failed to deinitialize injection queue: %d",
 			 __func__, qdf_status);
 	}
 
