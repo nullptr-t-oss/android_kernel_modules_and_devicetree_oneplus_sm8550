@@ -110,7 +110,7 @@ struct wireless_dev;
 		 WIPHY_VENDOR_CMD_NEED_NETDEV, \
 	.doit = hdd_reset_injection_stats_netlink, \
 	vendor_command_policy(VENDOR_CMD_RAW_DATA, 0) \
-}
+},
 
 /**
  * enum hdd_frame_inject_nl_cmd - Netlink commands for frame injection
