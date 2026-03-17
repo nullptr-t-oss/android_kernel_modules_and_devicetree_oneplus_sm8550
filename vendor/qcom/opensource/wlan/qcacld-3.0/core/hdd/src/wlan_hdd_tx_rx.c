@@ -39,6 +39,7 @@
 
 #include <linux/wireless.h>
 #include <net/cfg80211.h>
+#include <net/ieee80211_radiotap.h>
 #include "sap_api.h"
 #include "wlan_hdd_wmm.h"
 #include <cdp_txrx_cmn.h>
