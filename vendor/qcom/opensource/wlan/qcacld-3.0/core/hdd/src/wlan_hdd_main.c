@@ -17364,7 +17364,7 @@ static ssize_t wlan_hdd_state_ctrl_param_write(struct file *filp,
 {
 	int id, ret;
 	unsigned long rc;
-	struct hdd_context *hdd_ctx;
+	struct hdd_context *hdd_ctx = NULL;
 	bool is_wait_for_ready = false;
 	bool is_wlan_force_disabled;
 	bool monitor_active = false;
