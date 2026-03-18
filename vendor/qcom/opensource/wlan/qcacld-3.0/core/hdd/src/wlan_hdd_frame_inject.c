@@ -327,6 +327,18 @@ static QDF_STATUS hdd_create_injection_request(struct hdd_frame_inject_ioctl *io
 		return QDF_STATUS_E_INVAL;
 	}
 
+	/* Validate userspace frame_data pointer before accessing it */
+	if (!ioctl_data->frame_data) {
+		hdd_inject_err("NULL frame_data pointer from userspace");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (!access_ok(ioctl_data->frame_data, ioctl_data->frame_len)) {
+		hdd_inject_err("Invalid userspace frame_data pointer %pK len %u",
+			       ioctl_data->frame_data, ioctl_data->frame_len);
+		return QDF_STATUS_E_FAULT;
+	}
+
 	/* Allocate injection request */
 	injection_req = qdf_mem_malloc(sizeof(*injection_req));
 	if (!injection_req) {

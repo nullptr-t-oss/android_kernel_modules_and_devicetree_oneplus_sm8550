@@ -377,7 +377,7 @@ struct hdd_injection_ctx {
 struct hdd_frame_inject_ioctl {
 	uint32_t cmd;
 	uint32_t frame_len;
-	uint8_t *frame_data;
+	uint8_t __user *frame_data;
 	uint32_t tx_flags;
 	uint8_t retry_count;
 	uint32_t tx_rate;

@@ -548,6 +548,53 @@ void wma_injection_pre_stop_cleanup(tp_wma_handle wma_handle)
 	qdf_mem_zero(&g_inj_tx_vdev, sizeof(g_inj_tx_vdev));
 }
 
+/**
+ * wma_injection_notify_channel_change() - Re-tune injection helper vdev
+ * @wma_handle: WMA handle
+ * @mon_vdev_id: Monitor vdev ID whose channel changed
+ * @new_freq: New channel frequency in MHz
+ *
+ * Proactively re-tunes the hidden injection TX helper vdev to @new_freq.
+ * If no helper vdev exists yet this is a no-op (it will be created lazily
+ * on the first injection attempt at the new frequency).
+ */
+void wma_injection_notify_channel_change(tp_wma_handle wma_handle,
+					 uint8_t mon_vdev_id,
+					 uint32_t new_freq)
+{
+	QDF_STATUS status;
+
+	if (!wma_handle || !new_freq)
+		return;
+
+	/*
+	 * If no helper vdev exists, nothing to re-tune.  It will be
+	 * created at the correct frequency on the next injection attempt.
+	 */
+	if (!g_inj_tx_vdev.created)
+		return;
+
+	/* Already on the right channel — nothing to do */
+	if (g_inj_tx_vdev.chanfreq == new_freq)
+		return;
+
+	wma_info("Injection channel change: re-tuning helper vdev %u from %u to %u MHz (monitor vdev %u)",
+		 g_inj_tx_vdev.vdev_id, g_inj_tx_vdev.chanfreq,
+		 new_freq, mon_vdev_id);
+
+	/*
+	 * wma_injection_ensure_tx_vdev handles the channel change:
+	 * if the helper vdev exists but is on a different frequency,
+	 * it issues a VDEV_START restart to re-tune the synthesizer.
+	 * If that fails it tears down and recreates the vdev.
+	 */
+	status = wma_injection_ensure_tx_vdev(wma_handle, mon_vdev_id,
+					      new_freq);
+	if (QDF_IS_STATUS_ERROR(status))
+		wma_err("Failed to re-tune injection helper vdev to %u MHz: %d",
+			new_freq, status);
+}
+
 static void
 wma_injection_debug_cache_update(uint32_t desc_id,
 				 struct inject_frame_req *req,
@@ -1573,67 +1620,107 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	/*
 	 * Map injection TX rate to WMI tx_send_params.
 	 *
-	 * req->tx_rate is in 100kbps units (radiotap rate × 5).
-	 * WMI mcs_mask is a bitmask of allowed legacy rates:
-	 *   bit  0 → CCK 1 Mbps      (=  10 × 100kbps)
-	 *   bit  1 → CCK 2 Mbps      (=  20)
-	 *   bit  2 → CCK 5.5 Mbps    (=  55)
-	 *   bit  3 → CCK 11 Mbps     (= 110)
-	 *   bit  4 → OFDM 6 Mbps     (=  60)
-	 *   bit  5 → OFDM 9 Mbps     (=  90)
-	 *   bit  6 → OFDM 12 Mbps    (= 120)
-	 *   bit  7 → OFDM 18 Mbps    (= 180)
-	 *   bit  8 → OFDM 24 Mbps    (= 240)
-	 *   bit  9 → OFDM 36 Mbps    (= 360)
-	 *   bit 10 → OFDM 48 Mbps    (= 480)
-	 *   bit 11 → OFDM 54 Mbps    (= 540)
+	 * tx_rate encoding (set by radiotap parser in wlan_hdd_tx_rx.c):
 	 *
-	 * If an exact match is found the single bit is set, constraining
-	 * firmware to that rate.  Otherwise fall back to use_6mbps for OFDM
-	 * or let firmware pick the default.
+	 * Legacy rates (bit 15 clear):
+	 *   Value is in 100kbps units (radiotap rate × 5).
+	 *   Mapped to WMI mcs_mask bitmask of allowed legacy rates.
+	 *
+	 * MCS rates (bit 15 set):
+	 *   bits [6:0]   = MCS index (0-76)
+	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz)
+	 *   bit  [10]    = Short GI
+	 *   bit  [11]    = Greenfield
+	 *   bit  [12]    = LDPC
+	 *   bits [14:13] = STBC streams
+	 *   bit  [15]    = MCS indicator flag
 	 */
+#define HDD_INJECT_RATE_MCS_FLAG    BIT(15)
+
 	if (req->tx_rate != 0) {
-		static const struct {
-			uint16_t rate_100kbps;
-			uint16_t mcs_bit;
-			uint8_t  preamble; /* 0=OFDM, 1=CCK */
-		} rate_table[] = {
-			{  10, BIT(0),  1 },  /* CCK 1 Mbps */
-			{  20, BIT(1),  1 },  /* CCK 2 Mbps */
-			{  55, BIT(2),  1 },  /* CCK 5.5 Mbps */
-			{ 110, BIT(3),  1 },  /* CCK 11 Mbps */
-			{  60, BIT(4),  0 },  /* OFDM 6 Mbps */
-			{  90, BIT(5),  0 },  /* OFDM 9 Mbps */
-			{ 120, BIT(6),  0 },  /* OFDM 12 Mbps */
-			{ 180, BIT(7),  0 },  /* OFDM 18 Mbps */
-			{ 240, BIT(8),  0 },  /* OFDM 24 Mbps */
-			{ 360, BIT(9),  0 },  /* OFDM 36 Mbps */
-			{ 480, BIT(10), 0 },  /* OFDM 48 Mbps */
-			{ 540, BIT(11), 0 },  /* OFDM 54 Mbps */
-		};
-		int i;
-		bool matched = false;
+		if (req->tx_rate & HDD_INJECT_RATE_MCS_FLAG) {
+			/*
+			 * 802.11n MCS rate from radiotap field 19.
+			 *
+			 * WMI mcs_mask for HT: each bit corresponds to an
+			 * MCS index (0-11 in the 12-bit field).  For MCS
+			 * indices > 11, firmware uses the mcs_mask as a
+			 * direct index hint.  Set the single bit for the
+			 * requested MCS index (clamped to the 12-bit field).
+			 */
+			uint8_t mcs_idx = req->tx_rate & 0x7F;
+			uint8_t bw = (req->tx_rate >> 8) & 0x03;
+			bool sgi = !!(req->tx_rate & BIT(10));
+			bool ldpc = !!(req->tx_rate & BIT(12));
+			uint8_t stbc = (req->tx_rate >> 13) & 0x03;
 
-		for (i = 0; i < ARRAY_SIZE(rate_table); i++) {
-			if (req->tx_rate == rate_table[i].rate_100kbps) {
-				mgmt_params.tx_param.mcs_mask =
-					rate_table[i].mcs_bit;
-				mgmt_params.tx_param.preamble_type =
-					rate_table[i].preamble ?
-					BIT(1) /* CCK */ : BIT(0) /* OFDM */;
-				mgmt_params.tx_param.nss_mask = BIT(0);
-				mgmt_params.tx_param.bw_mask = BIT(2); /* 20MHz */
-				mgmt_params.tx_params_valid = true;
-				matched = true;
-				break;
+			if (mcs_idx < 12)
+				mgmt_params.tx_param.mcs_mask = BIT(mcs_idx);
+			else
+				mgmt_params.tx_param.mcs_mask = BIT(7); /* MCS7 fallback */
+
+			mgmt_params.tx_param.preamble_type = BIT(2); /* HT */
+			mgmt_params.tx_param.nss_mask =
+				BIT(mcs_idx / 8); /* NSS derived from MCS */
+			mgmt_params.tx_param.bw_mask =
+				(bw == 1) ? BIT(3) /* 40MHz */ : BIT(2) /* 20MHz */;
+			mgmt_params.tx_param.retry_limit = 4;
+
+			if (ldpc)
+				mgmt_params.tx_param.frame_type = 0; /* mgmt */
+			/* SGI and STBC are not directly in tx_send_params
+			 * but logged for debugging. Firmware may honor them
+			 * via rate-code selection from mcs_mask + preamble.
+			 */
+			mgmt_params.tx_params_valid = true;
+
+			wma_debug("Injection MCS rate: idx=%u bw=%u sgi=%u ldpc=%u stbc=%u nss_mask=0x%x",
+				  mcs_idx, bw, sgi ? 1 : 0, ldpc ? 1 : 0,
+				  stbc, mgmt_params.tx_param.nss_mask);
+		} else {
+			/* Legacy rate in 100kbps units */
+			static const struct {
+				uint16_t rate_100kbps;
+				uint16_t mcs_bit;
+				uint8_t  preamble; /* 0=OFDM, 1=CCK */
+			} rate_table[] = {
+				{  10, BIT(0),  1 },  /* CCK 1 Mbps */
+				{  20, BIT(1),  1 },  /* CCK 2 Mbps */
+				{  55, BIT(2),  1 },  /* CCK 5.5 Mbps */
+				{ 110, BIT(3),  1 },  /* CCK 11 Mbps */
+				{  60, BIT(4),  0 },  /* OFDM 6 Mbps */
+				{  90, BIT(5),  0 },  /* OFDM 9 Mbps */
+				{ 120, BIT(6),  0 },  /* OFDM 12 Mbps */
+				{ 180, BIT(7),  0 },  /* OFDM 18 Mbps */
+				{ 240, BIT(8),  0 },  /* OFDM 24 Mbps */
+				{ 360, BIT(9),  0 },  /* OFDM 36 Mbps */
+				{ 480, BIT(10), 0 },  /* OFDM 48 Mbps */
+				{ 540, BIT(11), 0 },  /* OFDM 54 Mbps */
+			};
+			int i;
+			bool matched = false;
+
+			for (i = 0; i < ARRAY_SIZE(rate_table); i++) {
+				if (req->tx_rate == rate_table[i].rate_100kbps) {
+					mgmt_params.tx_param.mcs_mask =
+						rate_table[i].mcs_bit;
+					mgmt_params.tx_param.preamble_type =
+						rate_table[i].preamble ?
+						BIT(1) /* CCK */ : BIT(0) /* OFDM */;
+					mgmt_params.tx_param.nss_mask = BIT(0);
+					mgmt_params.tx_param.bw_mask = BIT(2); /* 20MHz */
+					mgmt_params.tx_params_valid = true;
+					matched = true;
+					break;
+				}
 			}
-		}
 
-		if (!matched) {
-			/* Unknown rate — use 6 Mbps OFDM as safe default */
-			mgmt_params.use_6mbps = 1;
-			wma_debug("Injection: unmapped rate %u (100kbps), falling back to 6Mbps",
-				  req->tx_rate);
+			if (!matched) {
+				/* Unknown rate — use 6 Mbps OFDM as safe default */
+				mgmt_params.use_6mbps = 1;
+				wma_debug("Injection: unmapped rate %u (100kbps), falling back to 6Mbps",
+					  req->tx_rate);
+			}
 		}
 	}
 

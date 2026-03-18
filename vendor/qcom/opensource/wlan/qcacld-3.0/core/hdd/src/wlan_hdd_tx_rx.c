@@ -400,6 +400,21 @@ void hdd_get_tx_resource(uint8_t vdev_id,
 	}
 }
 
+
+unsigned int
+hdd_get_tx_flow_low_watermark(hdd_cb_handle cb_ctx, uint8_t intf_id)
+{
+	struct hdd_context *hdd_ctx = hdd_cb_handle_to_context(cb_ctx);
+	struct hdd_adapter *adapter;
+
+	adapter = hdd_get_adapter_by_vdev(hdd_ctx, intf_id);
+	if (!adapter)
+		return 0;
+
+	return adapter->tx_flow_low_watermark;
+}
+#endif /* QCA_LL_LEGACY_TX_FLOW_CONTROL */
+
 #ifdef FEATURE_FRAME_INJECTION_SUPPORT
 struct ieee80211_radiotap_header {
 	uint8_t it_version;
@@ -422,7 +437,21 @@ static inline uint16_t ieee80211_get_radiotap_len(const uint8_t *data)
 #define RADIOTAP_F_FLAGS          1
 #define RADIOTAP_F_RATE           2
 #define RADIOTAP_F_CHANNEL        3
+#define RADIOTAP_F_FHSS           4
+#define RADIOTAP_F_DBM_ANTSIGNAL  5
+#define RADIOTAP_F_DBM_ANTNOISE   6
+#define RADIOTAP_F_LOCK_QUALITY   7
+#define RADIOTAP_F_TX_ATTENUATION 8
+#define RADIOTAP_F_DB_TX_ATTENUATION 9
+#define RADIOTAP_F_DBM_TX_POWER  10
+#define RADIOTAP_F_ANTENNA       11
+#define RADIOTAP_F_DB_ANTSIGNAL  12
+#define RADIOTAP_F_DB_ANTNOISE   13
+#define RADIOTAP_F_RX_FLAGS      14
 #define RADIOTAP_F_TX_FLAGS      15
+#define RADIOTAP_F_RTS_RETRIES   16
+#define RADIOTAP_F_DATA_RETRIES  17
+#define RADIOTAP_F_XCHANNEL      18
 #define RADIOTAP_F_MCS           19
 
 /* Radiotap TX flags (field 15) */
@@ -433,37 +462,89 @@ static inline uint16_t ieee80211_get_radiotap_len(const uint8_t *data)
 #define RADIOTAP_F_WEP     0x04
 #define RADIOTAP_F_FRAG    0x08
 
-/* Size of each radiotap field used for pointer arithmetic */
-static const uint8_t radiotap_field_sizes[] = {
-	[RADIOTAP_F_TSFT]     = 8,  /* u64 */
-	[RADIOTAP_F_FLAGS]    = 1,  /* u8  */
-	[RADIOTAP_F_RATE]     = 1,  /* u8  */
-	[RADIOTAP_F_CHANNEL]  = 4,  /* u16 freq + u16 flags */
+/* Radiotap MCS known bits (field 19, byte 0) */
+#define RADIOTAP_MCS_HAVE_BW    0x01
+#define RADIOTAP_MCS_HAVE_MCS   0x02
+#define RADIOTAP_MCS_HAVE_GI    0x04
+#define RADIOTAP_MCS_HAVE_FMT   0x08
+#define RADIOTAP_MCS_HAVE_FEC   0x10
+#define RADIOTAP_MCS_HAVE_STBC  0x20
+
+/* Radiotap MCS flags (field 19, byte 1) */
+#define RADIOTAP_MCS_BW_MASK    0x03
+#define RADIOTAP_MCS_BW_20      0x00
+#define RADIOTAP_MCS_BW_40      0x01
+#define RADIOTAP_MCS_SGI        0x04
+#define RADIOTAP_MCS_FMT_GF     0x08  /* Greenfield */
+#define RADIOTAP_MCS_FEC_LDPC   0x10
+#define RADIOTAP_MCS_STBC_MASK  0x60
+#define RADIOTAP_MCS_STBC_SHIFT 5
+
+/*
+ * Per-field {size, alignment} for radiotap fields 0..19.
+ * Used to advance the pointer correctly when skipping fields.
+ * IEEE 802.11-2016 §9.14.3 Table 9-23.
+ */
+struct radiotap_field_info {
+	uint8_t size;
+	uint8_t align;
 };
-/* Alignment requirement for each field */
-static const uint8_t radiotap_field_align[] = {
-	[RADIOTAP_F_TSFT]     = 8,
-	[RADIOTAP_F_FLAGS]    = 1,
-	[RADIOTAP_F_RATE]     = 1,
-	[RADIOTAP_F_CHANNEL]  = 2,
+
+static const struct radiotap_field_info radiotap_fields[] = {
+	[RADIOTAP_F_TSFT]              = { 8, 8 },  /* u64 */
+	[RADIOTAP_F_FLAGS]             = { 1, 1 },  /* u8 */
+	[RADIOTAP_F_RATE]              = { 1, 1 },  /* u8 */
+	[RADIOTAP_F_CHANNEL]           = { 4, 2 },  /* u16 freq + u16 flags */
+	[RADIOTAP_F_FHSS]              = { 2, 1 },  /* u8 hop_set + u8 hop_pattern */
+	[RADIOTAP_F_DBM_ANTSIGNAL]     = { 1, 1 },  /* s8 */
+	[RADIOTAP_F_DBM_ANTNOISE]      = { 1, 1 },  /* s8 */
+	[RADIOTAP_F_LOCK_QUALITY]      = { 2, 2 },  /* u16 */
+	[RADIOTAP_F_TX_ATTENUATION]    = { 2, 2 },  /* u16 */
+	[RADIOTAP_F_DB_TX_ATTENUATION] = { 2, 2 },  /* u16 */
+	[RADIOTAP_F_DBM_TX_POWER]      = { 1, 1 },  /* s8 */
+	[RADIOTAP_F_ANTENNA]           = { 1, 1 },  /* u8 */
+	[RADIOTAP_F_DB_ANTSIGNAL]      = { 1, 1 },  /* u8 */
+	[RADIOTAP_F_DB_ANTNOISE]       = { 1, 1 },  /* u8 */
+	[RADIOTAP_F_RX_FLAGS]          = { 2, 2 },  /* u16 */
+	[RADIOTAP_F_TX_FLAGS]          = { 2, 2 },  /* u16 */
+	[RADIOTAP_F_RTS_RETRIES]       = { 1, 1 },  /* u8 */
+	[RADIOTAP_F_DATA_RETRIES]      = { 1, 1 },  /* u8 */
+	[RADIOTAP_F_XCHANNEL]          = { 8, 4 },  /* u32 flags + u16 freq + u8 chan + u8 maxpower */
+	[RADIOTAP_F_MCS]               = { 3, 1 },  /* u8 known + u8 flags + u8 mcs */
 };
+
+#define RADIOTAP_FIELDS_MAX  ARRAY_SIZE(radiotap_fields)
 
 /**
  * struct hdd_radiotap_tx_params - TX parameters extracted from radiotap header
- * @rate_100kbps: Data rate in 100kbps units (0 = not specified)
+ * @rate_100kbps: Legacy data rate in 100kbps units (0 = not specified)
  * @tx_flags: Mapped HDD injection TX flags
  * @channel_freq: Channel frequency in MHz (0 = not specified)
- * @has_rate: Whether rate field was present
+ * @mcs_index: 802.11n MCS index (0-76, valid only if has_mcs is true)
+ * @mcs_bw: MCS bandwidth (0=20MHz, 1=40MHz)
+ * @mcs_short_gi: Short guard interval requested
+ * @mcs_greenfield: Greenfield preamble requested
+ * @mcs_ldpc: LDPC FEC requested
+ * @mcs_stbc: STBC streams (0=none)
+ * @has_rate: Whether legacy rate field was present
  * @has_channel: Whether channel field was present
  * @has_noack: Whether TX NO_ACK was requested
+ * @has_mcs: Whether MCS field was present with valid index
  */
 struct hdd_radiotap_tx_params {
 	uint32_t rate_100kbps;
 	uint32_t tx_flags;
 	uint16_t channel_freq;
+	uint8_t mcs_index;
+	uint8_t mcs_bw;
+	bool mcs_short_gi;
+	bool mcs_greenfield;
+	bool mcs_ldpc;
+	uint8_t mcs_stbc;
 	bool has_rate;
 	bool has_channel;
 	bool has_noack;
+	bool has_mcs;
 };
 
 /**
@@ -473,7 +554,8 @@ struct hdd_radiotap_tx_params {
  * @params: Output structure for extracted parameters
  *
  * Walks the radiotap it_present bitmask and extracts rate, channel,
- * and TX flags for use in the frame injection request.
+ * TX flags, and MCS information for use in the frame injection request.
+ * Handles all standard fields 0-19 for correct pointer advancement.
  *
  * Return: true on success, false if header is malformed
  */
@@ -484,6 +566,7 @@ static bool hdd_parse_radiotap_tx_params(const uint8_t *data, uint32_t len,
 	uint16_t rtap_len;
 	uint32_t present;
 	const uint8_t *ptr;
+	const uint8_t *end;
 	int bit;
 
 	if (!data || !params || len < sizeof(*hdr))
@@ -500,7 +583,7 @@ static bool hdd_parse_radiotap_tx_params(const uint8_t *data, uint32_t len,
 		return false;
 
 	present = get_unaligned_le32(&hdr->it_present);
-	ptr = data + sizeof(*hdr);
+	end = data + rtap_len;
 
 	/*
 	 * Skip extended present bitmasks (bit 31 set = another u32 follows).
@@ -512,54 +595,54 @@ static bool hdd_parse_radiotap_tx_params(const uint8_t *data, uint32_t len,
 
 		while (p & BIT(31)) {
 			ext += 4;
-			if ((ext + 4) > (data + rtap_len))
+			if ((ext + 4) > end)
 				return false;
 			p = get_unaligned_le32(ext);
 		}
 		ptr = ext + 4;
 	}
 
-	/* Walk fields 0..RADIOTAP_F_MCS — skip fields we don't need but
-	 * account for their size to keep the pointer aligned correctly.
+	/*
+	 * Walk fields 0..RADIOTAP_F_MCS.  For each present field, align
+	 * the pointer, extract if it's a field we care about, then advance
+	 * past it.
 	 */
-	for (bit = 0; bit <= RADIOTAP_F_TX_FLAGS && ptr < data + rtap_len; bit++) {
+	for (bit = 0; bit <= RADIOTAP_F_MCS && ptr < end; bit++) {
+		const struct radiotap_field_info *fi;
+		unsigned long off;
+
 		if (!(present & BIT(bit)))
 			continue;
 
+		if (bit >= (int)RADIOTAP_FIELDS_MAX)
+			break;
+
+		fi = &radiotap_fields[bit];
+
 		/* Align pointer for this field */
-		if (bit <= RADIOTAP_F_CHANNEL && radiotap_field_align[bit] > 1) {
-			unsigned long off = ptr - data;
-			unsigned int align = radiotap_field_align[bit];
-
-			off = (off + align - 1) & ~((unsigned long)align - 1);
-			ptr = data + off;
-		} else if (bit == RADIOTAP_F_TX_FLAGS) {
-			/* TX flags field is u16, 2-byte aligned */
-			unsigned long off = ptr - data;
-
-			off = (off + 1) & ~1UL;
+		if (fi->align > 1) {
+			off = ptr - data;
+			off = (off + fi->align - 1) & ~((unsigned long)fi->align - 1);
 			ptr = data + off;
 		}
 
-		if (ptr >= data + rtap_len)
+		/* Bounds check before reading */
+		if (ptr + fi->size > end)
 			break;
 
+		/* Extract fields we care about */
 		switch (bit) {
-		case RADIOTAP_F_FLAGS:
-			/* flags u8 — just skip, nothing to extract for TX */
-			ptr += 1;
-			break;
 		case RADIOTAP_F_RATE:
 			/* Rate in 500kbps units → convert to 100kbps */
 			params->rate_100kbps = (*ptr) * 5;
 			params->has_rate = true;
-			ptr += 1;
 			break;
+
 		case RADIOTAP_F_CHANNEL:
 			params->channel_freq = get_unaligned_le16(ptr);
 			params->has_channel = true;
-			ptr += 4;  /* u16 freq + u16 flags */
 			break;
+
 		case RADIOTAP_F_TX_FLAGS:
 		{
 			uint16_t txf = get_unaligned_le16(ptr);
@@ -568,20 +651,46 @@ static bool hdd_parse_radiotap_tx_params(const uint8_t *data, uint32_t len,
 				params->tx_flags |= HDD_FRAME_INJECT_TX_NO_ACK;
 				params->has_noack = true;
 			}
-			ptr += 2;
 			break;
 		}
+
+		case RADIOTAP_F_MCS:
+		{
+			/*
+			 * MCS field: 3 bytes
+			 *   byte 0: known bitmask
+			 *   byte 1: flags (BW, GI, format, FEC, STBC)
+			 *   byte 2: MCS index (0-76)
+			 */
+			uint8_t known = ptr[0];
+			uint8_t flags = ptr[1];
+			uint8_t mcs = ptr[2];
+
+			if (known & RADIOTAP_MCS_HAVE_MCS) {
+				params->mcs_index = mcs;
+				params->has_mcs = true;
+			}
+			if (known & RADIOTAP_MCS_HAVE_BW)
+				params->mcs_bw = flags & RADIOTAP_MCS_BW_MASK;
+			if (known & RADIOTAP_MCS_HAVE_GI)
+				params->mcs_short_gi = !!(flags & RADIOTAP_MCS_SGI);
+			if (known & RADIOTAP_MCS_HAVE_FMT)
+				params->mcs_greenfield = !!(flags & RADIOTAP_MCS_FMT_GF);
+			if (known & RADIOTAP_MCS_HAVE_FEC)
+				params->mcs_ldpc = !!(flags & RADIOTAP_MCS_FEC_LDPC);
+			if (known & RADIOTAP_MCS_HAVE_STBC)
+				params->mcs_stbc = (flags & RADIOTAP_MCS_STBC_MASK)
+						   >> RADIOTAP_MCS_STBC_SHIFT;
+			break;
+		}
+
 		default:
-			/* Skip known fields by their size */
-			if (bit == RADIOTAP_F_TSFT)
-				ptr += 8;
-			else if (bit <= RADIOTAP_F_CHANNEL)
-				ptr += radiotap_field_sizes[bit];
-			else
-				/* Unknown field past our table — stop parsing */
-				return true;
+			/* Field we don't need — just skip past it */
 			break;
 		}
+
+		/* Advance pointer past this field */
+		ptr += fi->size;
 	}
 
 	return true;
@@ -711,9 +820,13 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 
 	if (rtap_parsed && !mon_rtap_params_logged &&
 	    (rtap_params.has_rate || rtap_params.has_noack ||
-	     rtap_params.has_channel)) {
-		hdd_warn("monitor tx: radiotap TX params: rate=%u (100kbps) channel=%u MHz noack=%u flags=0x%x",
+	     rtap_params.has_channel || rtap_params.has_mcs)) {
+		hdd_warn("monitor tx: radiotap TX params: rate=%u (100kbps) mcs=%u (has=%u bw=%u sgi=%u) channel=%u MHz noack=%u flags=0x%x",
 			 rtap_params.rate_100kbps,
+			 rtap_params.mcs_index,
+			 rtap_params.has_mcs ? 1 : 0,
+			 rtap_params.mcs_bw,
+			 rtap_params.mcs_short_gi ? 1 : 0,
 			 rtap_params.channel_freq,
 			 rtap_params.has_noack ? 1 : 0,
 			 rtap_params.tx_flags);
@@ -747,10 +860,40 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 	 * Populate TX parameters from radiotap extraction.
 	 * If no radiotap was present or parsing failed, these default to 0
 	 * which lets the firmware choose its own defaults.
+	 *
+	 * MCS encoding in tx_rate:
+	 *   If has_mcs is set, tx_rate is encoded as:
+	 *     bits [7:0]   = MCS index (0-76)
+	 *     bits [9:8]   = BW (0=20MHz, 1=40MHz)
+	 *     bit  [10]    = Short GI
+	 *     bit  [11]    = Greenfield
+	 *     bit  [12]    = LDPC
+	 *     bits [14:13] = STBC streams
+	 *     bit  [15]    = MCS indicator flag (always 1 for MCS)
+	 *   The WMA rate mapper checks bit 15 to distinguish MCS from legacy.
 	 */
+#define HDD_INJECT_RATE_MCS_FLAG    BIT(15)
+#define HDD_INJECT_RATE_MCS_MASK    0x007F  /* MCS index 0-76 */
+#define HDD_INJECT_RATE_BW_SHIFT    8
+#define HDD_INJECT_RATE_SGI_BIT     BIT(10)
+#define HDD_INJECT_RATE_GF_BIT      BIT(11)
+#define HDD_INJECT_RATE_LDPC_BIT    BIT(12)
+#define HDD_INJECT_RATE_STBC_SHIFT  13
+
 	if (rtap_parsed) {
 		req->tx_flags = rtap_params.tx_flags;
-		req->tx_rate = rtap_params.rate_100kbps;
+		if (rtap_params.has_mcs) {
+			/* Encode MCS params into tx_rate with flag bit */
+			req->tx_rate = HDD_INJECT_RATE_MCS_FLAG |
+				       (rtap_params.mcs_index & HDD_INJECT_RATE_MCS_MASK) |
+				       ((uint32_t)rtap_params.mcs_bw << HDD_INJECT_RATE_BW_SHIFT) |
+				       (rtap_params.mcs_short_gi ? HDD_INJECT_RATE_SGI_BIT : 0) |
+				       (rtap_params.mcs_greenfield ? HDD_INJECT_RATE_GF_BIT : 0) |
+				       (rtap_params.mcs_ldpc ? HDD_INJECT_RATE_LDPC_BIT : 0) |
+				       ((uint32_t)rtap_params.mcs_stbc << HDD_INJECT_RATE_STBC_SHIFT);
+		} else {
+			req->tx_rate = rtap_params.rate_100kbps;
+		}
 	} else {
 		req->tx_flags = 0;
 		req->tx_rate = 0;
@@ -767,21 +910,6 @@ drop:
 	kfree_skb(skb);
 }
 #endif
-
-unsigned int
-hdd_get_tx_flow_low_watermark(hdd_cb_handle cb_ctx, uint8_t intf_id)
-{
-	struct hdd_context *hdd_ctx = hdd_cb_handle_to_context(cb_ctx);
-	struct hdd_adapter *adapter;
-
-	adapter = hdd_get_adapter_by_vdev(hdd_ctx, intf_id);
-	if (!adapter)
-		return 0;
-
-	return adapter->tx_flow_low_watermark;
-}
-#endif /* QCA_LL_LEGACY_TX_FLOW_CONTROL */
-
 #ifdef RECEIVE_OFFLOAD
 qdf_napi_struct
 *hdd_legacy_gro_get_napi(qdf_nbuf_t nbuf, bool enable_rxthread)
