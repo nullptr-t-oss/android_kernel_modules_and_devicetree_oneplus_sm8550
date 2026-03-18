@@ -2064,7 +2064,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 				mac_hdr->fc.subType, (uint8_t *)mac_hdr,
 				frame_len + sizeof(tSirMacMgmtHdr),
 				session->vdev_id,
-					WMA_GET_RX_FREQ(rx_pkt_info), session,
+					WMA_GET_RX_FREQ(rx_pkt_info),
 						WMA_GET_RX_RSSI_NORMALIZED(
 						rx_pkt_info), RXMGMT_FLAG_NONE);
 				break;
