@@ -39,6 +39,7 @@
 #include "qdf_nbuf.h"
 #include "qdf_delayed_work.h"
 #include "qdf_time.h"
+#include "qdf_threads.h"
 #include "cds_api.h"
 #include "cdp_txrx_cmn.h"
 #include <wlan_vdev_mgr_tgt_if_tx_defs.h>
@@ -313,7 +314,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 			wmi_unified_vdev_set_param_send(wma->wmi_handle, &vp);
 
 			g_inj_tx_vdev.chanfreq = chanfreq;
-		qdf_mdelay(15);
+		qdf_sleep(15);
 			return QDF_STATUS_SUCCESS;
 		}
 
@@ -392,7 +393,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 	 * done and firmware asserts in wlan_vdev_find_vdev.
 	 */
 
-	qdf_mdelay(15);
+	qdf_sleep(15);
 
 	/* ---------- 2. VDEV START (20 MHz basic mode) ---------- */
 	qdf_mem_zero(&vstart, sizeof(vstart));
@@ -413,7 +414,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 		goto err_stop;
 	}
 
-	qdf_mdelay(15);
+	qdf_sleep(15);
 
 	/* ---------- 3. PEER CREATE (self-peer → fw vdev+0xc) ---------- */
 	qdf_mem_zero(&pcreate, sizeof(pcreate));
@@ -427,7 +428,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 		goto err_stop;
 	}
 
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	/*
 	 * Skip VDEV_UP.  For STA vdevs, firmware's wlan_vdev_up
@@ -473,20 +474,25 @@ static void wma_injection_destroy_tx_vdev(tp_wma_handle wma)
 	 */
 
 	/* 1. PEER_DELETE */
-	wmi_unified_peer_delete_send(wma->wmi_handle,
-				     g_inj_tx_vdev.mac_addr,
-				     g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	{
+		struct peer_delete_cmd_params del_param = {0};
+
+		del_param.vdev_id = g_inj_tx_vdev.vdev_id;
+		wmi_unified_peer_delete_send(wma->wmi_handle,
+					     g_inj_tx_vdev.mac_addr,
+					     &del_param);
+	}
+	qdf_sleep(10);
 
 	/* 2. VDEV_STOP (we did VDEV_START during create) */
 	wmi_unified_vdev_stop_send(wma->wmi_handle,
 				   g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	/* 3. VDEV_DELETE */
 	wmi_unified_vdev_delete_send(wma->wmi_handle,
 				     g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	wma_info("Injection TX helper vdev destroyed: vdev_id=%u",
 		 g_inj_tx_vdev.vdev_id);
@@ -528,20 +534,25 @@ void wma_injection_pre_stop_cleanup(tp_wma_handle wma_handle)
 		 g_inj_tx_vdev.vdev_id);
 
 	/* 1. PEER_DELETE */
-	wmi_unified_peer_delete_send(wma_handle->wmi_handle,
-				     g_inj_tx_vdev.mac_addr,
-				     g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	{
+		struct peer_delete_cmd_params del_param = {0};
+
+		del_param.vdev_id = g_inj_tx_vdev.vdev_id;
+		wmi_unified_peer_delete_send(wma_handle->wmi_handle,
+					     g_inj_tx_vdev.mac_addr,
+					     &del_param);
+	}
+	qdf_sleep(10);
 
 	/* 2. VDEV_STOP (we did VDEV_START during create) */
 	wmi_unified_vdev_stop_send(wma_handle->wmi_handle,
 				   g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	/* 3. VDEV_DELETE */
 	wmi_unified_vdev_delete_send(wma_handle->wmi_handle,
 				     g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	wma_info("Pre-stop cleanup: injection helper vdev destroyed: vdev_id=%u",
 		 g_inj_tx_vdev.vdev_id);
@@ -795,13 +806,6 @@ static bool wma_check_traffic_coordination(tp_wma_handle wma_handle, uint8_t vde
 	/* Check if interface is in a state that allows injection */
 	if (!iface->vdev) {
 		wma_debug("Interface %u not active, deferring injection", vdev_id);
-		return false;
-	}
-
-	/* Check if there's high priority management traffic pending */
-	if (iface->roaming_in_progress) {
-		wma_debug("High priority operation in progress on vdev %u, deferring injection",
-			  vdev_id);
 		return false;
 	}
 
@@ -1645,7 +1649,7 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	 *   Value is in 100kbps units (radiotap rate × 5).
 	 *   Mapped to WMI mcs_mask bitmask of allowed legacy rates.
 	 *
-	 * MCS rates (bit 15 set):
+	 * HT MCS rates (bit 15 set, bit 16 clear):
 	 *   bits [6:0]   = MCS index (0-76)
 	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz)
 	 *   bit  [10]    = Short GI
@@ -1653,49 +1657,94 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	 *   bit  [12]    = LDPC
 	 *   bits [14:13] = STBC streams
 	 *   bit  [15]    = MCS indicator flag
+	 *
+	 * VHT MCS rates (bit 15 set, bit 16 set):
+	 *   bits [3:0]   = VHT MCS index (0-9)
+	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz, 2=80MHz, 3=160MHz)
+	 *   bit  [10]    = Short GI
+	 *   bit  [12]    = LDPC
+	 *   bits [14:13] = STBC streams
+	 *   bit  [15]    = MCS indicator flag
+	 *   bit  [16]    = VHT indicator flag
+	 *   bits [19:17] = NSS-1 (0=NSS1 .. 7=NSS8)
 	 */
 #define HDD_INJECT_RATE_MCS_FLAG    BIT(15)
+#define HDD_INJECT_RATE_VHT_FLAG    BIT(16)
 
 	if (req->tx_rate != 0) {
 		if (req->tx_rate & HDD_INJECT_RATE_MCS_FLAG) {
-			/*
-			 * 802.11n MCS rate from radiotap field 19.
-			 *
-			 * WMI mcs_mask for HT: each bit corresponds to an
-			 * MCS index (0-11 in the 12-bit field).  For MCS
-			 * indices > 11, firmware uses the mcs_mask as a
-			 * direct index hint.  Set the single bit for the
-			 * requested MCS index (clamped to the 12-bit field).
-			 */
-			uint8_t mcs_idx = req->tx_rate & 0x7F;
-			uint8_t bw = (req->tx_rate >> 8) & 0x03;
-			bool sgi = !!(req->tx_rate & BIT(10));
+			bool sgi  = !!(req->tx_rate & BIT(10));
 			bool ldpc = !!(req->tx_rate & BIT(12));
 			uint8_t stbc = (req->tx_rate >> 13) & 0x03;
+			uint8_t bw   = (req->tx_rate >> 8) & 0x03;
 
-			if (mcs_idx < 12)
-				mgmt_params.tx_param.mcs_mask = BIT(mcs_idx);
-			else
-				mgmt_params.tx_param.mcs_mask = BIT(7); /* MCS7 fallback */
+			if (req->tx_rate & HDD_INJECT_RATE_VHT_FLAG) {
+				/*
+				 * 802.11ac VHT rate from radiotap field 20.
+				 */
+				uint8_t vht_mcs = req->tx_rate & 0x0F;
+				uint8_t nss = ((req->tx_rate >> 17) & 0x07) + 1;
 
-			mgmt_params.tx_param.preamble_type = BIT(2); /* HT */
-			mgmt_params.tx_param.nss_mask =
-				BIT(mcs_idx / 8); /* NSS derived from MCS */
-			mgmt_params.tx_param.bw_mask =
-				(bw == 1) ? BIT(3) /* 40MHz */ : BIT(2) /* 20MHz */;
-			mgmt_params.tx_param.retry_limit = 4;
+				mgmt_params.tx_param.mcs_mask =
+					BIT(vht_mcs < 10 ? vht_mcs : 9);
+				mgmt_params.tx_param.preamble_type = BIT(3); /* VHT */
+				mgmt_params.tx_param.nss_mask = BIT(nss - 1);
+				mgmt_params.tx_param.bw_mask =
+					(bw == 3) ? BIT(5) /* 160MHz */ :
+					(bw == 2) ? BIT(4) /* 80MHz */  :
+					(bw == 1) ? BIT(3) /* 40MHz */  : BIT(2) /* 20MHz */;
+				mgmt_params.tx_param.retry_limit = 4;
+				mgmt_params.tx_params_valid = true;
 
-			if (ldpc)
-				mgmt_params.tx_param.frame_type = 0; /* mgmt */
-			/* SGI and STBC are not directly in tx_send_params
-			 * but logged for debugging. Firmware may honor them
-			 * via rate-code selection from mcs_mask + preamble.
+				wma_debug("Injection VHT rate: mcs=%u bw=%u sgi=%u ldpc=%u stbc=%u nss=%u nss_mask=0x%x",
+					  vht_mcs, bw, sgi ? 1 : 0, ldpc ? 1 : 0,
+					  stbc, nss, mgmt_params.tx_param.nss_mask);
+			} else {
+				/*
+				 * 802.11n HT MCS rate from radiotap field 19.
+				 *
+				 * WMI mcs_mask for HT: each bit corresponds to an
+				 * MCS index (0-11 in the 12-bit field).  For MCS
+				 * indices > 11, firmware uses the mcs_mask as a
+				 * direct index hint.  Set the single bit for the
+				 * requested MCS index (clamped to the 12-bit field).
+				 */
+				uint8_t mcs_idx = req->tx_rate & 0x7F;
+
+				if (mcs_idx < 12)
+					mgmt_params.tx_param.mcs_mask = BIT(mcs_idx);
+				else
+					mgmt_params.tx_param.mcs_mask = BIT(7); /* MCS7 fallback */
+
+				mgmt_params.tx_param.preamble_type = BIT(2); /* HT */
+				mgmt_params.tx_param.nss_mask =
+					BIT(mcs_idx / 8); /* NSS derived from MCS index */
+				mgmt_params.tx_param.bw_mask =
+					(bw == 1) ? BIT(3) /* 40MHz */ : BIT(2) /* 20MHz */;
+				mgmt_params.tx_param.retry_limit = 4;
+				mgmt_params.tx_params_valid = true;
+
+				wma_debug("Injection HT MCS rate: idx=%u bw=%u sgi=%u ldpc=%u stbc=%u nss_mask=0x%x",
+					  mcs_idx, bw, sgi ? 1 : 0, ldpc ? 1 : 0,
+					  stbc, mgmt_params.tx_param.nss_mask);
+			}
+
+			/*
+			 * SGI and STBC have no per-frame field in tx_send_params.
+			 * Apply them as vdev params on the helper vdev so the
+			 * firmware rate-code engine can honor them.
 			 */
-			mgmt_params.tx_params_valid = true;
-
-			wma_debug("Injection MCS rate: idx=%u bw=%u sgi=%u ldpc=%u stbc=%u nss_mask=0x%x",
-				  mcs_idx, bw, sgi ? 1 : 0, ldpc ? 1 : 0,
-				  stbc, mgmt_params.tx_param.nss_mask);
+			if (g_inj_tx_vdev.created) {
+				if (sgi)
+					wma_vdev_set_param(wma_handle->wmi_handle,
+							   g_inj_tx_vdev.vdev_id,
+							   WMI_VDEV_PARAM_SGI, 1);
+				if (stbc)
+					wma_vdev_set_param(wma_handle->wmi_handle,
+							   g_inj_tx_vdev.vdev_id,
+							   WMI_VDEV_PARAM_TX_STBC,
+							   stbc);
+			}
 		} else {
 			/* Legacy rate in 100kbps units */
 			static const struct {

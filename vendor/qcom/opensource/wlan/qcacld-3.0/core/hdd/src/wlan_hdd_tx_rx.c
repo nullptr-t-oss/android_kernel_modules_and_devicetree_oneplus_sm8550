@@ -442,6 +442,7 @@ hdd_get_tx_flow_low_watermark(hdd_cb_handle cb_ctx, uint8_t intf_id)
 #define RADIOTAP_F_DATA_RETRIES  17
 #define RADIOTAP_F_XCHANNEL      18
 #define RADIOTAP_F_MCS           19
+#define RADIOTAP_F_VHT           20
 
 /* Radiotap TX flags (field 15) */
 #define RADIOTAP_F_TX_NOACK  0x0008
@@ -468,6 +469,28 @@ hdd_get_tx_flow_low_watermark(hdd_cb_handle cb_ctx, uint8_t intf_id)
 #define RADIOTAP_MCS_FEC_LDPC   0x10
 #define RADIOTAP_MCS_STBC_MASK  0x60
 #define RADIOTAP_MCS_STBC_SHIFT 5
+
+/* Radiotap VHT known bits (field 20, bytes 0-1, u16 LE) */
+#define RADIOTAP_VHT_KNOWN_STBC         BIT(0)
+#define RADIOTAP_VHT_KNOWN_GI           BIT(2)
+#define RADIOTAP_VHT_KNOWN_LDPC_OFDM    BIT(4)
+#define RADIOTAP_VHT_KNOWN_BEAMFORMED   BIT(5)
+#define RADIOTAP_VHT_KNOWN_BANDWIDTH    BIT(6)
+
+/* Radiotap VHT flags byte (field 20, byte 2) */
+#define RADIOTAP_VHT_FLAG_STBC          BIT(0)
+#define RADIOTAP_VHT_FLAG_SGI           BIT(2)
+#define RADIOTAP_VHT_FLAG_LDPC_OFDM     BIT(4)
+#define RADIOTAP_VHT_FLAG_BEAMFORMED    BIT(5)
+
+/*
+ * VHT bandwidth field values (byte 3 of VHT radiotap field):
+ *   0  = 20 MHz,  1-3  = 40 MHz variants,
+ *   4-10 = 80 MHz variants, 11+ = 160 MHz variants.
+ */
+#define RADIOTAP_VHT_BW_20_THRESH    1   /* values < 1 → 20 MHz */
+#define RADIOTAP_VHT_BW_80_THRESH    4   /* values 4-10 → 80 MHz */
+#define RADIOTAP_VHT_BW_160_THRESH  11   /* values >= 11 → 160 MHz */
 
 /*
  * Per-field {size, alignment} for radiotap fields 0..19.
@@ -500,6 +523,7 @@ static const struct radiotap_field_info radiotap_fields[] = {
 	[RADIOTAP_F_DATA_RETRIES]      = { 1, 1 },  /* u8 */
 	[RADIOTAP_F_XCHANNEL]          = { 8, 4 },  /* u32 flags + u16 freq + u8 chan + u8 maxpower */
 	[RADIOTAP_F_MCS]               = { 3, 1 },  /* u8 known + u8 flags + u8 mcs */
+	[RADIOTAP_F_VHT]               = { 12, 2 }, /* u16 known + u8 flags + u8 bw + u8[4] mcs_nss + u8 coding + u8 group_id + u16 partial_aid */
 };
 
 #define RADIOTAP_FIELDS_MAX  ARRAY_SIZE(radiotap_fields)
@@ -515,10 +539,17 @@ static const struct radiotap_field_info radiotap_fields[] = {
  * @mcs_greenfield: Greenfield preamble requested
  * @mcs_ldpc: LDPC FEC requested
  * @mcs_stbc: STBC streams (0=none)
+ * @vht_mcs: 802.11ac VHT MCS index (0-9, valid only if has_vht is true)
+ * @vht_nss: VHT spatial streams (1-8, valid only if has_vht is true)
+ * @vht_bw: VHT BW encoding: 0=20, 1=40, 2=80, 3=160 MHz
+ * @vht_short_gi: VHT short guard interval requested
+ * @vht_ldpc: VHT LDPC FEC requested
+ * @vht_stbc: VHT STBC streams (0=none)
  * @has_rate: Whether legacy rate field was present
  * @has_channel: Whether channel field was present
  * @has_noack: Whether TX NO_ACK was requested
  * @has_mcs: Whether MCS field was present with valid index
+ * @has_vht: Whether VHT field was present with valid MCS
  */
 struct hdd_radiotap_tx_params {
 	uint32_t rate_100kbps;
@@ -530,10 +561,17 @@ struct hdd_radiotap_tx_params {
 	bool mcs_greenfield;
 	bool mcs_ldpc;
 	uint8_t mcs_stbc;
+	uint8_t vht_mcs;
+	uint8_t vht_nss;
+	uint8_t vht_bw;
+	bool vht_short_gi;
+	bool vht_ldpc;
+	uint8_t vht_stbc;
 	bool has_rate;
 	bool has_channel;
 	bool has_noack;
 	bool has_mcs;
+	bool has_vht;
 };
 
 /**
@@ -592,11 +630,11 @@ static bool hdd_parse_radiotap_tx_params(const uint8_t *data, uint32_t len,
 	}
 
 	/*
-	 * Walk fields 0..RADIOTAP_F_MCS.  For each present field, align
+	 * Walk fields 0..RADIOTAP_F_VHT.  For each present field, align
 	 * the pointer, extract if it's a field we care about, then advance
 	 * past it.
 	 */
-	for (bit = 0; bit <= RADIOTAP_F_MCS && ptr < end; bit++) {
+	for (bit = 0; bit <= RADIOTAP_F_VHT && ptr < end; bit++) {
 		const struct radiotap_field_info *fi;
 		unsigned long off;
 
@@ -670,6 +708,61 @@ static bool hdd_parse_radiotap_tx_params(const uint8_t *data, uint32_t len,
 			if (known & RADIOTAP_MCS_HAVE_STBC)
 				params->mcs_stbc = (flags & RADIOTAP_MCS_STBC_MASK)
 						   >> RADIOTAP_MCS_STBC_SHIFT;
+			break;
+		}
+
+		case RADIOTAP_F_VHT:
+		{
+			/*
+			 * VHT field: 12 bytes (IEEE 802.11-2016 §9.14.3.11)
+			 *   bytes [1:0]: known (u16 LE)
+			 *   byte  [2]:   flags
+			 *   byte  [3]:   bandwidth
+			 *   bytes [7:4]: mcs_nss[4] — per-stream MCS/NSS
+			 *                  bits[3:0] = MCS index (0-9)
+			 *                  bits[7:4] = NSS-1 (0=1 stream)
+			 *   byte  [8]:   coding (LDPC bitmask per stream)
+			 *   byte  [9]:   group_id
+			 *   bytes [11:10]: partial_aid (u16 LE)
+			 */
+			uint16_t known = get_unaligned_le16(ptr);
+			uint8_t  flags = ptr[2];
+			uint8_t  bw    = ptr[3];
+			uint8_t  mcs_nss0 = ptr[4]; /* stream 0: MCS + NSS */
+			uint8_t  coding   = ptr[8];
+			uint8_t  vht_mcs  = mcs_nss0 & 0x0F;
+			uint8_t  vht_nss  = ((mcs_nss0 >> 4) & 0x0F) + 1;
+
+			/* Only extract if stream 0 has a valid MCS */
+			if (vht_mcs <= 9 && vht_nss >= 1) {
+				params->vht_mcs = vht_mcs;
+				params->vht_nss = vht_nss;
+				params->has_vht = true;
+			}
+
+			if (known & RADIOTAP_VHT_KNOWN_GI)
+				params->vht_short_gi = !!(flags & RADIOTAP_VHT_FLAG_SGI);
+
+			if (known & RADIOTAP_VHT_KNOWN_STBC)
+				params->vht_stbc = !!(flags & RADIOTAP_VHT_FLAG_STBC);
+
+			if (known & RADIOTAP_VHT_KNOWN_LDPC_OFDM)
+				params->vht_ldpc = !!(coding & BIT(0));
+
+			/*
+			 * Map raw radiotap BW byte to our 2-bit BW encoding:
+			 *   0=20MHz, 1=40MHz, 2=80MHz, 3=160MHz
+			 */
+			if (known & RADIOTAP_VHT_KNOWN_BANDWIDTH) {
+				if (bw >= RADIOTAP_VHT_BW_160_THRESH)
+					params->vht_bw = 3;
+				else if (bw >= RADIOTAP_VHT_BW_80_THRESH)
+					params->vht_bw = 2;
+				else if (bw >= RADIOTAP_VHT_BW_20_THRESH)
+					params->vht_bw = 1;
+				else
+					params->vht_bw = 0;
+			}
 			break;
 		}
 
@@ -809,16 +902,27 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 
 	if (rtap_parsed && !mon_rtap_params_logged &&
 	    (rtap_params.has_rate || rtap_params.has_noack ||
-	     rtap_params.has_channel || rtap_params.has_mcs)) {
-		hdd_warn("monitor tx: radiotap TX params: rate=%u (100kbps) mcs=%u (has=%u bw=%u sgi=%u) channel=%u MHz noack=%u flags=0x%x",
-			 rtap_params.rate_100kbps,
-			 rtap_params.mcs_index,
-			 rtap_params.has_mcs ? 1 : 0,
-			 rtap_params.mcs_bw,
-			 rtap_params.mcs_short_gi ? 1 : 0,
-			 rtap_params.channel_freq,
-			 rtap_params.has_noack ? 1 : 0,
-			 rtap_params.tx_flags);
+	     rtap_params.has_channel || rtap_params.has_mcs ||
+	     rtap_params.has_vht)) {
+		if (rtap_params.has_vht)
+			hdd_warn("monitor tx: radiotap VHT params: mcs=%u nss=%u bw=%u sgi=%u ldpc=%u stbc=%u channel=%u MHz noack=%u",
+				 rtap_params.vht_mcs, rtap_params.vht_nss,
+				 rtap_params.vht_bw,
+				 rtap_params.vht_short_gi ? 1 : 0,
+				 rtap_params.vht_ldpc ? 1 : 0,
+				 rtap_params.vht_stbc,
+				 rtap_params.channel_freq,
+				 rtap_params.has_noack ? 1 : 0);
+		else
+			hdd_warn("monitor tx: radiotap TX params: rate=%u (100kbps) mcs=%u (has=%u bw=%u sgi=%u) channel=%u MHz noack=%u flags=0x%x",
+				 rtap_params.rate_100kbps,
+				 rtap_params.mcs_index,
+				 rtap_params.has_mcs ? 1 : 0,
+				 rtap_params.mcs_bw,
+				 rtap_params.mcs_short_gi ? 1 : 0,
+				 rtap_params.channel_freq,
+				 rtap_params.has_noack ? 1 : 0,
+				 rtap_params.tx_flags);
 		mon_rtap_params_logged = true;
 	}
 
@@ -862,17 +966,29 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 	 *   The WMA rate mapper checks bit 15 to distinguish MCS from legacy.
 	 */
 #define HDD_INJECT_RATE_MCS_FLAG    BIT(15)
-#define HDD_INJECT_RATE_MCS_MASK    0x007F  /* MCS index 0-76 */
-#define HDD_INJECT_RATE_BW_SHIFT    8
+#define HDD_INJECT_RATE_VHT_FLAG    BIT(16)  /* Set alongside MCS_FLAG for VHT */
+#define HDD_INJECT_RATE_MCS_MASK    0x007F   /* HT: MCS index 0-76; VHT: bits[3:0] = MCS 0-9 */
+#define HDD_INJECT_RATE_BW_SHIFT    8        /* bits[9:8]: 0=20, 1=40, 2=80, 3=160 MHz */
 #define HDD_INJECT_RATE_SGI_BIT     BIT(10)
-#define HDD_INJECT_RATE_GF_BIT      BIT(11)
+#define HDD_INJECT_RATE_GF_BIT      BIT(11)  /* HT Greenfield (unused for VHT) */
 #define HDD_INJECT_RATE_LDPC_BIT    BIT(12)
-#define HDD_INJECT_RATE_STBC_SHIFT  13
+#define HDD_INJECT_RATE_STBC_SHIFT  13       /* bits[14:13]: STBC streams */
+#define HDD_INJECT_RATE_NSS_SHIFT   17       /* bits[19:17]: VHT NSS-1 (0=NSS1 .. 7=NSS8) */
 
 	if (rtap_parsed) {
 		req->tx_flags = rtap_params.tx_flags;
-		if (rtap_params.has_mcs) {
-			/* Encode MCS params into tx_rate with flag bit */
+		if (rtap_params.has_vht) {
+			/* Encode VHT params: MCS_FLAG + VHT_FLAG both set */
+			req->tx_rate = HDD_INJECT_RATE_MCS_FLAG |
+				       HDD_INJECT_RATE_VHT_FLAG |
+				       (rtap_params.vht_mcs & 0x0F) |
+				       ((uint32_t)rtap_params.vht_bw << HDD_INJECT_RATE_BW_SHIFT) |
+				       (rtap_params.vht_short_gi ? HDD_INJECT_RATE_SGI_BIT : 0) |
+				       (rtap_params.vht_ldpc ? HDD_INJECT_RATE_LDPC_BIT : 0) |
+				       ((uint32_t)rtap_params.vht_stbc << HDD_INJECT_RATE_STBC_SHIFT) |
+				       ((uint32_t)(rtap_params.vht_nss - 1) << HDD_INJECT_RATE_NSS_SHIFT);
+		} else if (rtap_params.has_mcs) {
+			/* Encode HT MCS params into tx_rate with flag bit */
 			req->tx_rate = HDD_INJECT_RATE_MCS_FLAG |
 				       (rtap_params.mcs_index & HDD_INJECT_RATE_MCS_MASK) |
 				       ((uint32_t)rtap_params.mcs_bw << HDD_INJECT_RATE_BW_SHIFT) |
