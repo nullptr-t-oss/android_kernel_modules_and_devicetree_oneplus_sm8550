@@ -988,7 +988,7 @@ dp_tx_mon_send_to_stack(struct dp_pdev *pdev, qdf_nbuf_t mpdu,
 	tx_capture_info.mpdu_nbuf = mpdu;
 	tx_capture_info.mpdu_info.ppdu_id = ppdu_id;
 	if (!dp_lite_mon_is_tx_enabled(mon_pdev)) {
-		dp_wdi_event_handler(WDI_EVENT_TX_PKT_CAPTURE,
+		dp_wdi_event_handler(WDI_EVENT_PKT_CAPTURE_TX_DATA,
 				     pdev->soc,
 				     &tx_capture_info,
 				     HTT_INVALID_PEER,

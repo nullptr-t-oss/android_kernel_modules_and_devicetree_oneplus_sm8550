@@ -336,7 +336,8 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 		for (i = fw_max_vid; i >= 0; i--) {
 			if ((uint8_t)i == mon_vdev_id)
 				continue;
-			if (!wma->interfaces[i].vdev) {
+			if (!wma->interfaces[i].vdev &&
+			    !wma->interfaces[i].vdev_active) {
 				vid = (uint8_t)i;
 				found = true;
 				break;
@@ -442,6 +443,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 	g_inj_tx_vdev.monitor_vdev_id  = mon_vdev_id;
 	g_inj_tx_vdev.chanfreq         = chanfreq;
 	qdf_mem_copy(g_inj_tx_vdev.mac_addr, inj_mac, QDF_MAC_ADDR_SIZE);
+	wma->interfaces[vid].vdev_active = true;
 
 	wma_info("Injection TX helper vdev created: vdev_id=%u mac=%pM freq=%u type=STA",
 		 vid, inj_mac, chanfreq);
@@ -496,6 +498,7 @@ static void wma_injection_destroy_tx_vdev(tp_wma_handle wma)
 
 	wma_info("Injection TX helper vdev destroyed: vdev_id=%u",
 		 g_inj_tx_vdev.vdev_id);
+	wma->interfaces[g_inj_tx_vdev.vdev_id].vdev_active = false;
 	qdf_mem_zero(&g_inj_tx_vdev, sizeof(g_inj_tx_vdev));
 }
 
@@ -556,6 +559,7 @@ void wma_injection_pre_stop_cleanup(tp_wma_handle wma_handle)
 
 	wma_info("Pre-stop cleanup: injection helper vdev destroyed: vdev_id=%u",
 		 g_inj_tx_vdev.vdev_id);
+	wma_handle->interfaces[g_inj_tx_vdev.vdev_id].vdev_active = false;
 	qdf_mem_zero(&g_inj_tx_vdev, sizeof(g_inj_tx_vdev));
 }
 
@@ -1658,7 +1662,7 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	 *   bits [14:13] = STBC streams
 	 *   bit  [15]    = MCS indicator flag
 	 *
-	 * VHT MCS rates (bit 15 set, bit 16 set):
+	 * VHT MCS rates (bit 15 set, bit 16 set, bit 20 clear):
 	 *   bits [3:0]   = VHT MCS index (0-9)
 	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz, 2=80MHz, 3=160MHz)
 	 *   bit  [10]    = Short GI
@@ -1667,9 +1671,19 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	 *   bit  [15]    = MCS indicator flag
 	 *   bit  [16]    = VHT indicator flag
 	 *   bits [19:17] = NSS-1 (0=NSS1 .. 7=NSS8)
+	 *
+	 * HE (802.11ax) rates (bit 15 set, bit 20 set):
+	 *   bits [3:0]   = HE MCS index (0-11)
+	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz, 2=80MHz, 3=160MHz)
+	 *   bit  [10]    = Short GI (0.8µs)
+	 *   bit  [12]    = LDPC
+	 *   bit  [15]    = MCS indicator flag
+	 *   bit  [20]    = HE indicator flag
+	 *   bits [19:17] = NSS-1 (0=NSS1 .. 7=NSS8)
 	 */
 #define HDD_INJECT_RATE_MCS_FLAG    BIT(15)
 #define HDD_INJECT_RATE_VHT_FLAG    BIT(16)
+#define HDD_INJECT_RATE_HE_FLAG     BIT(20)
 
 	if (req->tx_rate != 0) {
 		if (req->tx_rate & HDD_INJECT_RATE_MCS_FLAG) {
@@ -1678,9 +1692,29 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 			uint8_t stbc = (req->tx_rate >> 13) & 0x03;
 			uint8_t bw   = (req->tx_rate >> 8) & 0x03;
 
-			if (req->tx_rate & HDD_INJECT_RATE_VHT_FLAG) {
+			if (req->tx_rate & HDD_INJECT_RATE_HE_FLAG) {
 				/*
-				 * 802.11ac VHT rate from radiotap field 20.
+				 * 802.11ax HE rate from radiotap field 23.
+				 */
+				uint8_t he_mcs = req->tx_rate & 0x0F;
+				uint8_t nss = ((req->tx_rate >> 17) & 0x07) + 1;
+
+				mgmt_params.tx_param.mcs_mask =
+					BIT(he_mcs < 12 ? he_mcs : 11);
+				mgmt_params.tx_param.preamble_type = BIT(4); /* HE */
+				mgmt_params.tx_param.nss_mask = BIT(nss - 1);
+				mgmt_params.tx_param.bw_mask =
+					(bw == 3) ? BIT(5) :
+					(bw == 2) ? BIT(4) :
+					(bw == 1) ? BIT(3) : BIT(2);
+				mgmt_params.tx_param.retry_limit = 4;
+				mgmt_params.tx_params_valid = true;
+
+				wma_debug("Injection HE rate: mcs=%u bw=%u sgi=%u ldpc=%u nss=%u",
+					  he_mcs, bw, sgi ? 1 : 0, ldpc ? 1 : 0, nss);
+			} else if (req->tx_rate & HDD_INJECT_RATE_VHT_FLAG) {
+				/*
+				 * 802.11ac VHT rate from radiotap field 21.
 				 */
 				uint8_t vht_mcs = req->tx_rate & 0x0F;
 				uint8_t nss = ((req->tx_rate >> 17) & 0x07) + 1;

@@ -31,6 +31,7 @@
 #include <qdf_mem.h>
 #include <qdf_trace.h>
 #include <qdf_time.h>
+#include <qdf_mc_timer.h>
 
 #ifdef FEATURE_FRAME_INJECTION_SUPPORT
 
@@ -70,7 +71,7 @@ struct injection_session {
  */
 static uint64_t hdd_get_current_time_ms(void)
 {
-	return qdf_get_log_timestamp();
+	return (uint64_t)qdf_get_time_of_the_day_ms();
 }
 
 /**
