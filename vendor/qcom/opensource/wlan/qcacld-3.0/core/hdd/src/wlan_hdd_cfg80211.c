@@ -66,6 +66,7 @@
 #include "wma_types.h"
 #include "wma.h"
 #include "wma_twt.h"
+#include "wma_frame_inject.h"
 #include "wlan_hdd_misc.h"
 #include "wlan_hdd_nan.h"
 #include "wlan_logging_sock_svc.h"
