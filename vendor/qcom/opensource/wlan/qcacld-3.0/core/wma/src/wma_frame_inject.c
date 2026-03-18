@@ -1539,11 +1539,16 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	mgmt_params.frm_len = req->frame_len;
 	mgmt_params.vdev_id = vdev_id;
 	/*
-	 * Use ACK-completion tx type for injection consistently. Several
-	 * firmware builds are stricter with probe-request tx_type handling and
-	 * are less likely to discard when sent with ACK-completion semantics.
+	 * Default to ACK-completion tx type.  If the injection request has
+	 * the NO_ACK flag set (e.g. from radiotap TX_FLAGS), switch to the
+	 * no-ack variant so firmware does not wait for an ACK and the frame
+	 * is fire-and-forget — required for deauth/disassoc injection and
+	 * broadcast frames used by tools like aireplay-ng and mdk4.
 	 */
-	mgmt_params.tx_type = GENERIC_NODOWLOAD_ACK_COMP_INDEX;
+	if (req->tx_flags & HDD_FRAME_INJECT_TX_NO_ACK)
+		mgmt_params.tx_type = GENERIC_NODOWNLD_NOACK_COMP_INDEX;
+	else
+		mgmt_params.tx_type = GENERIC_NODOWLOAD_ACK_COMP_INDEX;
 	/*
 	 * Align with regular host management TX behavior:
 	 * probe request uses chanfreq=0 while action/auth/probe-rsp can carry
@@ -1565,10 +1570,71 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	wma_injection_debug_cache_update(mgmt_params.desc_id, req, fc_type,
 					 fc_subtype, mgmt_params.chanfreq);
 
-	/* Set transmission rate if specified in injection request */
+	/*
+	 * Map injection TX rate to WMI tx_send_params.
+	 *
+	 * req->tx_rate is in 100kbps units (radiotap rate × 5).
+	 * WMI mcs_mask is a bitmask of allowed legacy rates:
+	 *   bit  0 → CCK 1 Mbps      (=  10 × 100kbps)
+	 *   bit  1 → CCK 2 Mbps      (=  20)
+	 *   bit  2 → CCK 5.5 Mbps    (=  55)
+	 *   bit  3 → CCK 11 Mbps     (= 110)
+	 *   bit  4 → OFDM 6 Mbps     (=  60)
+	 *   bit  5 → OFDM 9 Mbps     (=  90)
+	 *   bit  6 → OFDM 12 Mbps    (= 120)
+	 *   bit  7 → OFDM 18 Mbps    (= 180)
+	 *   bit  8 → OFDM 24 Mbps    (= 240)
+	 *   bit  9 → OFDM 36 Mbps    (= 360)
+	 *   bit 10 → OFDM 48 Mbps    (= 480)
+	 *   bit 11 → OFDM 54 Mbps    (= 540)
+	 *
+	 * If an exact match is found the single bit is set, constraining
+	 * firmware to that rate.  Otherwise fall back to use_6mbps for OFDM
+	 * or let firmware pick the default.
+	 */
 	if (req->tx_rate != 0) {
-		mgmt_params.tx_param.mcs_mask = req->tx_rate;
-		mgmt_params.tx_params_valid = true;
+		static const struct {
+			uint16_t rate_100kbps;
+			uint16_t mcs_bit;
+			uint8_t  preamble; /* 0=OFDM, 1=CCK */
+		} rate_table[] = {
+			{  10, BIT(0),  1 },  /* CCK 1 Mbps */
+			{  20, BIT(1),  1 },  /* CCK 2 Mbps */
+			{  55, BIT(2),  1 },  /* CCK 5.5 Mbps */
+			{ 110, BIT(3),  1 },  /* CCK 11 Mbps */
+			{  60, BIT(4),  0 },  /* OFDM 6 Mbps */
+			{  90, BIT(5),  0 },  /* OFDM 9 Mbps */
+			{ 120, BIT(6),  0 },  /* OFDM 12 Mbps */
+			{ 180, BIT(7),  0 },  /* OFDM 18 Mbps */
+			{ 240, BIT(8),  0 },  /* OFDM 24 Mbps */
+			{ 360, BIT(9),  0 },  /* OFDM 36 Mbps */
+			{ 480, BIT(10), 0 },  /* OFDM 48 Mbps */
+			{ 540, BIT(11), 0 },  /* OFDM 54 Mbps */
+		};
+		int i;
+		bool matched = false;
+
+		for (i = 0; i < ARRAY_SIZE(rate_table); i++) {
+			if (req->tx_rate == rate_table[i].rate_100kbps) {
+				mgmt_params.tx_param.mcs_mask =
+					rate_table[i].mcs_bit;
+				mgmt_params.tx_param.preamble_type =
+					rate_table[i].preamble ?
+					BIT(1) /* CCK */ : BIT(0) /* OFDM */;
+				mgmt_params.tx_param.nss_mask = BIT(0);
+				mgmt_params.tx_param.bw_mask = BIT(2); /* 20MHz */
+				mgmt_params.tx_params_valid = true;
+				matched = true;
+				break;
+			}
+		}
+
+		if (!matched) {
+			/* Unknown rate — use 6 Mbps OFDM as safe default */
+			mgmt_params.use_6mbps = 1;
+			wma_debug("Injection: unmapped rate %u (100kbps), falling back to 6Mbps",
+				  req->tx_rate);
+		}
 	}
 
 	if (!inject_tx_cfg_logged) {

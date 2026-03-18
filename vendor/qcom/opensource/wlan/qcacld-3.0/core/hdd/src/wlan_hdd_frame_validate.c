@@ -654,9 +654,18 @@ QDF_STATUS hdd_sanitize_frame_content(uint8_t *frame_data, uint32_t frame_len)
 	frame_type = frame->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
 	frame_subtype = frame->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
 
-	/* Clear reserved bits in frame control */
-	frame->i_fc[0] &= ~0x03; /* Clear version bits (should be 00) */
-	frame->i_fc[1] &= ~0x40; /* Clear reserved bit */
+	/*
+	 * Sanitize frame control field.
+	 *
+	 * FC byte 0 bits [1:0] = Protocol Version (must be 0 for 802.11).
+	 * Already validated by hdd_validate_frame_header(), but enforce here
+	 * as a safety net.
+	 *
+	 * FC byte 1 bit 6 = Order bit.  This is NOT reserved — it indicates
+	 * the presence of the HT Control field (+HTC) in 802.11n/ac/ax QoS
+	 * data and management frames.  Do NOT clear it.
+	 */
+	frame->i_fc[0] &= ~0x03; /* Force protocol version to 0 */
 
 	/* Sanitize based on frame type */
 	switch (frame_type) {

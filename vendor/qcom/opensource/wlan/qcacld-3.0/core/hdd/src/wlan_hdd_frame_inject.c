@@ -35,6 +35,10 @@
 #include <qdf_trace.h>
 #include <qdf_nbuf.h>
 #include "wlan_hdd_cfg80211.h"
+#include "cdp_txrx_cmn.h"
+#include "cdp_txrx_flow_ctrl_legacy.h"
+#include "cdp_txrx_misc.h"
+#include "ol_txrx.h"
 
 #ifdef FEATURE_FRAME_INJECTION_SUPPORT
 
@@ -434,15 +438,34 @@ QDF_STATUS hdd_process_frame_injection(struct hdd_adapter *adapter,
 	}
 
 	/*
-	 * Injection currently transmits via WMI mgmt-tx path, so only 802.11
-	 * management frames are supported on this path.
+	 * Determine 802.11 frame type for routing decisions downstream.
+	 * Management frames  (type 0x00) → WMI mgmt TX path
+	 * Data frames        (type 0x08) → CDP raw data TX path
+	 * Control frames     (type 0x04) → Best-effort via WMI mgmt TX
+	 *
+	 * All three types are accepted for injection.  Tools like
+	 * aireplay-ng inject data frames (ARP replay, chopchop,
+	 * fragmentation) and control frames (RTS for CTS-forcing).
 	 */
 	frame_type = req->frame_data[0] & 0x0c;
-	if (frame_type != 0x00) {
+	switch (frame_type) {
+	case 0x00: /* Management */
+		hdd_inject_debug("Management frame injection: subtype=0x%02x len=%u",
+				 req->frame_data[0] & 0xf0, req->frame_len);
+		break;
+	case 0x08: /* Data */
+		hdd_inject_debug("Data frame injection: subtype=0x%02x len=%u",
+				 req->frame_data[0] & 0xf0, req->frame_len);
+		break;
+	case 0x04: /* Control */
+		hdd_inject_debug("Control frame injection: subtype=0x%02x len=%u",
+				 req->frame_data[0] & 0xf0, req->frame_len);
+		break;
+	default:
 		hdd_update_injection_stats(adapter, HDD_INJECTION_STAT_VALIDATION_FAILURES, 1);
-		hdd_inject_warn("Dropping non-management injection frame: fc_type=0x%02x len=%u",
+		hdd_inject_warn("Dropping frame with invalid type: fc_type=0x%02x len=%u",
 				frame_type, req->frame_len);
-		return QDF_STATUS_E_NOSUPPORT;
+		return QDF_STATUS_E_INVAL;
 	}
 
 	/* Queue frame for injection */
@@ -667,9 +690,76 @@ void hdd_process_injection_queue_work(void *arg)
 				}
 			}
 
-			wma_status = wma_queue_injection_frame(
-				(tp_wma_handle)injection_ctx->wma_handle, req,
-				tx_vdev_id);
+			wma_status = QDF_STATUS_E_FAILURE;
+
+			/*
+			 * Route frames based on 802.11 type:
+			 *
+			 * Management (0x00): WMI mgmt TX via WMA queue
+			 *   - Uses helper STA vdev for monitor mode
+			 *   - Firmware handles rate control and retries
+			 *
+			 * Data (0x08): CDP raw non-standard TX
+			 *   - Goes through the data path directly
+			 *   - Required for aireplay-ng ARP replay,
+			 *     chopchop, fragmentation attacks
+			 *
+			 * Control (0x04): Best-effort via WMI mgmt TX
+			 *   - Most firmware won't actually TX pure control
+			 *     frames but will accept the WMI command
+			 *   - RTS injection for CTS-forcing may work
+			 *     depending on firmware build
+			 */
+			{
+				uint8_t fc_type = req->frame_data[0] & 0x0c;
+
+				if (fc_type == 0x08) {
+					/* Data frame: use CDP raw TX path */
+					qdf_nbuf_t nbuf;
+					void *data_soc;
+
+					data_soc = cds_get_context(QDF_MODULE_ID_SOC);
+					if (!data_soc) {
+						hdd_inject_err("CDP SOC not available for data TX");
+						wma_status = QDF_STATUS_E_FAILURE;
+						goto inject_done;
+					}
+
+					nbuf = qdf_nbuf_alloc(NULL, req->frame_len, 0, 0, false);
+					if (!nbuf) {
+						hdd_inject_err("Failed to alloc nbuf for data injection");
+						wma_status = QDF_STATUS_E_NOMEM;
+						goto inject_done;
+					}
+
+					qdf_mem_copy(qdf_nbuf_put_tail(nbuf, req->frame_len),
+						     req->frame_data, req->frame_len);
+
+					/*
+					 * cdp_tx_non_std sends a raw 802.11 frame through
+					 * the firmware data path.  OL_TX_SPEC_RAW tells the
+					 * datapath to transmit the buffer as-is without
+					 * 802.3→802.11 encapsulation.
+					 */
+					if (cdp_tx_non_std(data_soc, tx_vdev_id,
+							   OL_TX_SPEC_RAW, nbuf) != NULL) {
+						/* nbuf was not consumed — TX failed */
+						qdf_nbuf_free(nbuf);
+						hdd_inject_err("CDP raw data TX rejected for vdev %u",
+							       tx_vdev_id);
+						wma_status = QDF_STATUS_E_FAILURE;
+					} else {
+						/* nbuf consumed by CDP — success */
+						wma_status = QDF_STATUS_SUCCESS;
+					}
+				} else {
+					/* Management or control frame: WMI mgmt TX */
+					wma_status = wma_queue_injection_frame(
+						(tp_wma_handle)injection_ctx->wma_handle, req,
+						tx_vdev_id);
+				}
+			}
+inject_done:
 
 			/* Update timing for completion */
 			req->complete_time = qdf_get_log_timestamp();

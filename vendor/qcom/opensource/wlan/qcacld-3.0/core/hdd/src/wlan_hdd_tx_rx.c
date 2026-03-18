@@ -414,6 +414,179 @@ static inline uint16_t ieee80211_get_radiotap_len(const uint8_t *data)
 	return get_unaligned_le16(&hdr->it_len);
 }
 
+/*
+ * Radiotap field bit positions (IEEE 802.11-2016 §9.14.3).
+ * Only the fields relevant to TX injection are defined here.
+ */
+#define RADIOTAP_F_TSFT           0
+#define RADIOTAP_F_FLAGS          1
+#define RADIOTAP_F_RATE           2
+#define RADIOTAP_F_CHANNEL        3
+#define RADIOTAP_F_TX_FLAGS      15
+#define RADIOTAP_F_MCS           19
+
+/* Radiotap TX flags (field 15) */
+#define RADIOTAP_F_TX_NOACK  0x0008
+#define RADIOTAP_F_TX_NOSEQNO 0x0010
+
+/* Radiotap FLAGS (field 1) bits */
+#define RADIOTAP_F_WEP     0x04
+#define RADIOTAP_F_FRAG    0x08
+
+/* Size of each radiotap field used for pointer arithmetic */
+static const uint8_t radiotap_field_sizes[] = {
+	[RADIOTAP_F_TSFT]     = 8,  /* u64 */
+	[RADIOTAP_F_FLAGS]    = 1,  /* u8  */
+	[RADIOTAP_F_RATE]     = 1,  /* u8  */
+	[RADIOTAP_F_CHANNEL]  = 4,  /* u16 freq + u16 flags */
+};
+/* Alignment requirement for each field */
+static const uint8_t radiotap_field_align[] = {
+	[RADIOTAP_F_TSFT]     = 8,
+	[RADIOTAP_F_FLAGS]    = 1,
+	[RADIOTAP_F_RATE]     = 1,
+	[RADIOTAP_F_CHANNEL]  = 2,
+};
+
+/**
+ * struct hdd_radiotap_tx_params - TX parameters extracted from radiotap header
+ * @rate_100kbps: Data rate in 100kbps units (0 = not specified)
+ * @tx_flags: Mapped HDD injection TX flags
+ * @channel_freq: Channel frequency in MHz (0 = not specified)
+ * @has_rate: Whether rate field was present
+ * @has_channel: Whether channel field was present
+ * @has_noack: Whether TX NO_ACK was requested
+ */
+struct hdd_radiotap_tx_params {
+	uint32_t rate_100kbps;
+	uint32_t tx_flags;
+	uint16_t channel_freq;
+	bool has_rate;
+	bool has_channel;
+	bool has_noack;
+};
+
+/**
+ * hdd_parse_radiotap_tx_params() - Extract TX parameters from radiotap header
+ * @data: Pointer to start of radiotap header
+ * @len: Total length of radiotap + payload
+ * @params: Output structure for extracted parameters
+ *
+ * Walks the radiotap it_present bitmask and extracts rate, channel,
+ * and TX flags for use in the frame injection request.
+ *
+ * Return: true on success, false if header is malformed
+ */
+static bool hdd_parse_radiotap_tx_params(const uint8_t *data, uint32_t len,
+					 struct hdd_radiotap_tx_params *params)
+{
+	const struct ieee80211_radiotap_header *hdr;
+	uint16_t rtap_len;
+	uint32_t present;
+	const uint8_t *ptr;
+	int bit;
+
+	if (!data || !params || len < sizeof(*hdr))
+		return false;
+
+	memset(params, 0, sizeof(*params));
+
+	hdr = (const struct ieee80211_radiotap_header *)data;
+	if (hdr->it_version != 0)
+		return false;
+
+	rtap_len = get_unaligned_le16(&hdr->it_len);
+	if (rtap_len < sizeof(*hdr) || rtap_len > len)
+		return false;
+
+	present = get_unaligned_le32(&hdr->it_present);
+	ptr = data + sizeof(*hdr);
+
+	/*
+	 * Skip extended present bitmasks (bit 31 set = another u32 follows).
+	 * Each extension is a 4-byte le32 immediately after the base header.
+	 */
+	{
+		uint32_t p = present;
+		const uint8_t *ext = (const uint8_t *)&hdr->it_present;
+
+		while (p & BIT(31)) {
+			ext += 4;
+			if ((ext + 4) > (data + rtap_len))
+				return false;
+			p = get_unaligned_le32(ext);
+		}
+		ptr = ext + 4;
+	}
+
+	/* Walk fields 0..RADIOTAP_F_MCS — skip fields we don't need but
+	 * account for their size to keep the pointer aligned correctly.
+	 */
+	for (bit = 0; bit <= RADIOTAP_F_TX_FLAGS && ptr < data + rtap_len; bit++) {
+		if (!(present & BIT(bit)))
+			continue;
+
+		/* Align pointer for this field */
+		if (bit <= RADIOTAP_F_CHANNEL && radiotap_field_align[bit] > 1) {
+			unsigned long off = ptr - data;
+			unsigned int align = radiotap_field_align[bit];
+
+			off = (off + align - 1) & ~((unsigned long)align - 1);
+			ptr = data + off;
+		} else if (bit == RADIOTAP_F_TX_FLAGS) {
+			/* TX flags field is u16, 2-byte aligned */
+			unsigned long off = ptr - data;
+
+			off = (off + 1) & ~1UL;
+			ptr = data + off;
+		}
+
+		if (ptr >= data + rtap_len)
+			break;
+
+		switch (bit) {
+		case RADIOTAP_F_FLAGS:
+			/* flags u8 — just skip, nothing to extract for TX */
+			ptr += 1;
+			break;
+		case RADIOTAP_F_RATE:
+			/* Rate in 500kbps units → convert to 100kbps */
+			params->rate_100kbps = (*ptr) * 5;
+			params->has_rate = true;
+			ptr += 1;
+			break;
+		case RADIOTAP_F_CHANNEL:
+			params->channel_freq = get_unaligned_le16(ptr);
+			params->has_channel = true;
+			ptr += 4;  /* u16 freq + u16 flags */
+			break;
+		case RADIOTAP_F_TX_FLAGS:
+		{
+			uint16_t txf = get_unaligned_le16(ptr);
+
+			if (txf & RADIOTAP_F_TX_NOACK) {
+				params->tx_flags |= HDD_FRAME_INJECT_TX_NO_ACK;
+				params->has_noack = true;
+			}
+			ptr += 2;
+			break;
+		}
+		default:
+			/* Skip known fields by their size */
+			if (bit == RADIOTAP_F_TSFT)
+				ptr += 8;
+			else if (bit <= RADIOTAP_F_CHANNEL)
+				ptr += radiotap_field_sizes[bit];
+			else
+				/* Unknown field past our table — stop parsing */
+				return true;
+			break;
+		}
+	}
+
+	return true;
+}
+
 /**
  * hdd_is_monitor_tx_dev() - detect monitor-mode netdev tx context
  * @adapter: HDD adapter bound to @dev
@@ -454,7 +627,9 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 {
 	static bool mon_tx_path_logged;
 	static bool mon_ctx_force_logged;
+	static bool mon_rtap_params_logged;
 	struct ieee80211_radiotap_header *rthdr;
+	struct hdd_radiotap_tx_params rtap_params;
 	struct inject_frame_req *req;
 	uint8_t *frame_data;
 	uint16_t rtap_len;
@@ -462,6 +637,7 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 	uint64_t now;
 	QDF_STATUS status;
 	bool has_radiotap = false;
+	bool rtap_parsed = false;
 
 	if (!adapter || !adapter->injection_ctx || !skb)
 		goto drop;
@@ -500,7 +676,16 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 		}
 	}
 
+	/*
+	 * Extract TX parameters (rate, channel, flags) from the radiotap
+	 * header before stripping it.  Tools like aireplay-ng, mdk4, and
+	 * scapy encode desired TX rate and NO_ACK hints here.
+	 */
+	memset(&rtap_params, 0, sizeof(rtap_params));
 	if (has_radiotap) {
+		rtap_parsed = hdd_parse_radiotap_tx_params(skb->data,
+							   skb->len,
+							   &rtap_params);
 		frame_data = skb->data + rtap_len;
 		frame_len = skb->len - rtap_len;
 	} else {
@@ -524,6 +709,17 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 		mon_tx_path_logged = true;
 	}
 
+	if (rtap_parsed && !mon_rtap_params_logged &&
+	    (rtap_params.has_rate || rtap_params.has_noack ||
+	     rtap_params.has_channel)) {
+		hdd_warn("monitor tx: radiotap TX params: rate=%u (100kbps) channel=%u MHz noack=%u flags=0x%x",
+			 rtap_params.rate_100kbps,
+			 rtap_params.channel_freq,
+			 rtap_params.has_noack ? 1 : 0,
+			 rtap_params.tx_flags);
+		mon_rtap_params_logged = true;
+	}
+
 	req = qdf_mem_malloc(sizeof(*req));
 	if (!req)
 		goto drop;
@@ -539,15 +735,26 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 	now = qdf_get_log_timestamp();
 
 	req->frame_len = frame_len;
-	req->tx_flags = 0;
 	req->retry_count = 0;
-	req->tx_rate = 0;
 	req->timestamp = now;
 	req->session_id = (uint32_t)now;
 	req->submit_time = now;
 	req->queue_time = 0;
 	req->process_time = 0;
 	req->complete_time = 0;
+
+	/*
+	 * Populate TX parameters from radiotap extraction.
+	 * If no radiotap was present or parsing failed, these default to 0
+	 * which lets the firmware choose its own defaults.
+	 */
+	if (rtap_parsed) {
+		req->tx_flags = rtap_params.tx_flags;
+		req->tx_rate = rtap_params.rate_100kbps;
+	} else {
+		req->tx_flags = 0;
+		req->tx_rate = 0;
+	}
 
 	status = hdd_process_frame_injection(adapter, req);
 	if (QDF_IS_STATUS_ERROR(status)) {
