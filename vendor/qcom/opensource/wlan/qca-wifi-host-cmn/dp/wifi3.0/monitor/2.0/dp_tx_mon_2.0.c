@@ -682,6 +682,74 @@ QDF_STATUS dp_peer_set_tx_capture_enabled_2_0(struct dp_pdev *pdev_handle,
 					      uint8_t is_tx_pkt_cap_enable,
 					      uint8_t *peer_mac)
 {
+	struct dp_mon_pdev *mon_pdev;
+	struct dp_mon_pdev_be *mon_pdev_be;
+	struct dp_pdev_tx_monitor_be *tx_mon_be;
+	uint8_t i;
+
+	if (!pdev_handle || !peer_mac) {
+		dp_mon_err("Invalid pdev handle or peer MAC");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	mon_pdev = pdev_handle->monitor_pdev;
+	if (!mon_pdev)
+		return QDF_STATUS_E_INVAL;
+
+	mon_pdev_be = dp_get_be_mon_pdev_from_dp_mon_pdev(mon_pdev);
+	if (!mon_pdev_be)
+		return QDF_STATUS_E_INVAL;
+
+	tx_mon_be = &mon_pdev_be->tx_monitor_be;
+
+	if (is_tx_pkt_cap_enable) {
+		/* Check if peer already in filter list */
+		for (i = 0; i < tx_mon_be->peer_filter_count; i++) {
+			if (!qdf_mem_cmp(tx_mon_be->peer_filters[i].peer_mac,
+					 peer_mac, QDF_MAC_ADDR_SIZE)) {
+				tx_mon_be->peer_filters[i].is_tx_cap_enabled = true;
+				dp_mon_info("Peer TX capture updated for " QDF_MAC_ADDR_FMT,
+					    QDF_MAC_ADDR_REF(peer_mac));
+				return QDF_STATUS_SUCCESS;
+			}
+		}
+		/* Add new peer filter entry */
+		if (tx_mon_be->peer_filter_count >=
+		    DP_TX_MON_MAX_PEER_FILTER) {
+			dp_mon_err("Peer TX capture filter list full (%u)",
+				   DP_TX_MON_MAX_PEER_FILTER);
+			return QDF_STATUS_E_RESOURCES;
+		}
+		i = tx_mon_be->peer_filter_count;
+		tx_mon_be->peer_filters[i].is_tx_cap_enabled = true;
+		qdf_mem_copy(tx_mon_be->peer_filters[i].peer_mac,
+			     peer_mac, QDF_MAC_ADDR_SIZE);
+		tx_mon_be->peer_filter_count++;
+		dp_mon_info("Peer TX capture enabled for " QDF_MAC_ADDR_FMT " (slot %u)",
+			    QDF_MAC_ADDR_REF(peer_mac), i);
+	} else {
+		/* Remove peer from filter list */
+		for (i = 0; i < tx_mon_be->peer_filter_count; i++) {
+			if (!qdf_mem_cmp(tx_mon_be->peer_filters[i].peer_mac,
+					 peer_mac, QDF_MAC_ADDR_SIZE)) {
+				/* Shift remaining entries down */
+				if (i < tx_mon_be->peer_filter_count - 1) {
+					qdf_mem_move(
+						&tx_mon_be->peer_filters[i],
+						&tx_mon_be->peer_filters[i + 1],
+						(tx_mon_be->peer_filter_count - i - 1) *
+						sizeof(struct dp_peer_tx_capture_be));
+				}
+				tx_mon_be->peer_filter_count--;
+				dp_mon_info("Peer TX capture disabled for " QDF_MAC_ADDR_FMT,
+					    QDF_MAC_ADDR_REF(peer_mac));
+				return QDF_STATUS_SUCCESS;
+			}
+		}
+		dp_mon_debug("Peer " QDF_MAC_ADDR_FMT " not in TX capture filter",
+			     QDF_MAC_ADDR_REF(peer_mac));
+	}
+
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -1228,42 +1296,47 @@ void dp_tx_ppdu_stats_detach_2_0(struct dp_pdev *pdev)
 		return;
 
 	tx_mon_be = &mon_pdev_be->tx_monitor_be;
-	/* TODO: disable tx_monitor, to avoid further packet from HW */
+
+	/* Disable TX monitor to stop HW from delivering further packets */
 	dp_monitor_config_enh_tx_capture(pdev, TX_MON_BE_DISABLE);
 
-	/* flush workqueue */
+	/* Flush and destroy workqueue */
 	qdf_flush_workqueue(0, tx_mon_be->post_ppdu_workqueue);
 	qdf_destroy_workqueue(0, tx_mon_be->post_ppdu_workqueue);
 
-	/*
-	 * TODO: iterate both tx_ppdu_info and defer_ppdu_info_list
-	 * free the tx_ppdu_info and decrement depth
-	 */
+	/* Free current in-progress ppdu_info (not yet queued) */
+	if (tx_mon_be->tx_prot_ppdu_info) {
+		dp_tx_mon_free_ppdu_info(tx_mon_be->tx_prot_ppdu_info,
+					 tx_mon_be);
+		tx_mon_be->tx_prot_ppdu_info = NULL;
+	}
+	if (tx_mon_be->tx_data_ppdu_info) {
+		dp_tx_mon_free_ppdu_info(tx_mon_be->tx_data_ppdu_info,
+					 tx_mon_be);
+		tx_mon_be->tx_data_ppdu_info = NULL;
+	}
+
+	/* Iterate tx_ppdu_info_queue and free all entries */
 	qdf_spin_lock_bh(&tx_mon_be->tx_mon_list_lock);
 	STAILQ_FOREACH_SAFE(tx_ppdu_info,
 			    &tx_mon_be->tx_ppdu_info_queue,
 			    tx_ppdu_info_queue_elem, tx_ppdu_info_next) {
-		/* remove dp_tx_ppdu_info from the list */
 		STAILQ_REMOVE(&tx_mon_be->tx_ppdu_info_queue, tx_ppdu_info,
 			      dp_tx_ppdu_info, tx_ppdu_info_queue_elem);
-		/* decrement list length */
 		tx_mon_be->tx_ppdu_info_list_depth--;
-		/* free tx_ppdu_info */
 		dp_tx_mon_free_ppdu_info(tx_ppdu_info, tx_mon_be);
 	}
 	qdf_spin_unlock_bh(&tx_mon_be->tx_mon_list_lock);
 
+	/* Iterate defer_tx_ppdu_info_queue and free all entries */
 	qdf_spin_lock_bh(&tx_mon_be->tx_mon_list_lock);
 	STAILQ_FOREACH_SAFE(tx_ppdu_info,
 			    &tx_mon_be->defer_tx_ppdu_info_queue,
 			    tx_ppdu_info_queue_elem, tx_ppdu_info_next) {
-		/* remove dp_tx_ppdu_info from the list */
 		STAILQ_REMOVE(&tx_mon_be->defer_tx_ppdu_info_queue,
 			      tx_ppdu_info,
 			      dp_tx_ppdu_info, tx_ppdu_info_queue_elem);
-		/* decrement list length */
 		tx_mon_be->defer_ppdu_info_list_depth--;
-		/* free tx_ppdu_info */
 		dp_tx_mon_free_ppdu_info(tx_ppdu_info, tx_mon_be);
 	}
 	qdf_spin_unlock_bh(&tx_mon_be->tx_mon_list_lock);

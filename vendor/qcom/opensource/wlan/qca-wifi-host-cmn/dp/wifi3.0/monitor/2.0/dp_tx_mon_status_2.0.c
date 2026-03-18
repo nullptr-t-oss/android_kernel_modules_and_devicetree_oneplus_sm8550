@@ -764,7 +764,8 @@ dp_tx_mon_generate_mu_block_ack_frm(struct dp_pdev *pdev,
 				   TXMON_MU_BA_ACK_FRAME_SZ(ba_sz), 0, 4,
 				   FALSE);
 	if (!mpdu_nbuf) {
-		/* TODO: update status and break */
+		tx_mon_be->stats.mpdu_drop_cnt++;
+		dp_mon_err("MU BA frame alloc failed (ba_sz=%u)", ba_sz);
 		return;
 	}
 
@@ -886,7 +887,9 @@ dp_tx_mon_generate_block_ack_frm(struct dp_pdev *pdev,
 				   TXMON_BA_ACK_FRAME_SZ(ba_bitmap_sz),
 				   0, 4, FALSE);
 	if (!mpdu_nbuf) {
-		/* TODO: update status and break */
+		tx_mon_be->stats.mpdu_drop_cnt++;
+		dp_mon_err("BA frame alloc failed (bitmap_sz=%u)",
+			   ba_bitmap_sz);
 		return;
 	}
 
@@ -1569,35 +1572,39 @@ dp_tx_mon_process_tlv_2_0(struct dp_pdev *pdev,
 	if (TXMON_PPDU_HAL(tx_prot_ppdu_info, is_used)) {
 		if (qdf_unlikely(!TXMON_PPDU_COM(tx_prot_ppdu_info,
 						 chan_num))) {
-			/* update channel number, if not fetched properly */
 			TXMON_PPDU_COM(tx_prot_ppdu_info,
 				       chan_num) = mon_pdev->mon_chan_num;
 		}
 
 		if (qdf_unlikely(!TXMON_PPDU_COM(tx_prot_ppdu_info,
 						 chan_freq))) {
-			/* update channel frequency, if not fetched properly */
 			TXMON_PPDU_COM(tx_prot_ppdu_info,
 				       chan_freq) = mon_pdev->mon_chan_freq;
 		}
 
 		/*
-		 * add dp_tx_ppdu_info to pdev queue
-		 * for post processing
-		 *
-		 * TODO: add a threshold check and drop the ppdu info
+		 * Drop ppdu info if queue depth exceeds threshold to
+		 * prevent unbounded memory growth under heavy traffic.
 		 */
-		qdf_spin_lock_bh(&tx_mon_be->tx_mon_list_lock);
-		tx_mon_be->last_prot_ppdu_info =
-					tx_mon_be->tx_prot_ppdu_info;
-		STAILQ_INSERT_TAIL(&tx_mon_be->tx_ppdu_info_queue,
-				   tx_prot_ppdu_info,
-				   tx_ppdu_info_queue_elem);
-		tx_mon_be->tx_ppdu_info_list_depth++;
-
-		tx_mon_be->tx_prot_ppdu_info = NULL;
-		qdf_spin_unlock_bh(&tx_mon_be->tx_mon_list_lock);
-		schedule_wrq = true;
+		if (qdf_unlikely(tx_mon_be->tx_ppdu_info_list_depth >=
+				 DP_TX_MON_MAX_PPDU_QUEUE_DEPTH)) {
+			tx_mon_be->stats.ppdu_info_drop_th++;
+			dp_tx_mon_free_ppdu_info(tx_prot_ppdu_info,
+						 tx_mon_be);
+			tx_mon_be->tx_prot_ppdu_info = NULL;
+			tx_prot_ppdu_info = NULL;
+		} else {
+			qdf_spin_lock_bh(&tx_mon_be->tx_mon_list_lock);
+			tx_mon_be->last_prot_ppdu_info =
+						tx_mon_be->tx_prot_ppdu_info;
+			STAILQ_INSERT_TAIL(&tx_mon_be->tx_ppdu_info_queue,
+					   tx_prot_ppdu_info,
+					   tx_ppdu_info_queue_elem);
+			tx_mon_be->tx_ppdu_info_list_depth++;
+			tx_mon_be->tx_prot_ppdu_info = NULL;
+			qdf_spin_unlock_bh(&tx_mon_be->tx_mon_list_lock);
+			schedule_wrq = true;
+		}
 	} else {
 		dp_tx_mon_free_ppdu_info(tx_prot_ppdu_info, tx_mon_be);
 		tx_mon_be->tx_prot_ppdu_info = NULL;
@@ -1607,35 +1614,36 @@ dp_tx_mon_process_tlv_2_0(struct dp_pdev *pdev,
 	if (TXMON_PPDU_HAL(tx_data_ppdu_info, is_used)) {
 		if (qdf_unlikely(!TXMON_PPDU_COM(tx_data_ppdu_info,
 						 chan_num))) {
-			/* update channel number, if not fetched properly */
 			TXMON_PPDU_COM(tx_data_ppdu_info,
 				       chan_num) = mon_pdev->mon_chan_num;
 		}
 
 		if (qdf_unlikely(!TXMON_PPDU_COM(tx_data_ppdu_info,
 						 chan_freq))) {
-			/* update channel frequency, if not fetched properly */
 			TXMON_PPDU_COM(tx_data_ppdu_info,
 				       chan_freq) = mon_pdev->mon_chan_freq;
 		}
 
-		/*
-		 * add dp_tx_ppdu_info to pdev queue
-		 * for post processing
-		 *
-		 * TODO: add a threshold check and drop the ppdu info
-		 */
-		qdf_spin_lock_bh(&tx_mon_be->tx_mon_list_lock);
-		tx_mon_be->last_data_ppdu_info =
-					tx_mon_be->tx_data_ppdu_info;
-		STAILQ_INSERT_TAIL(&tx_mon_be->tx_ppdu_info_queue,
-				   tx_data_ppdu_info,
-				   tx_ppdu_info_queue_elem);
-		tx_mon_be->tx_ppdu_info_list_depth++;
-
-		tx_mon_be->tx_data_ppdu_info = NULL;
-		qdf_spin_unlock_bh(&tx_mon_be->tx_mon_list_lock);
-		schedule_wrq = true;
+		/* Drop ppdu info if queue depth exceeds threshold */
+		if (qdf_unlikely(tx_mon_be->tx_ppdu_info_list_depth >=
+				 DP_TX_MON_MAX_PPDU_QUEUE_DEPTH)) {
+			tx_mon_be->stats.ppdu_info_drop_th++;
+			dp_tx_mon_free_ppdu_info(tx_data_ppdu_info,
+						 tx_mon_be);
+			tx_mon_be->tx_data_ppdu_info = NULL;
+			tx_data_ppdu_info = NULL;
+		} else {
+			qdf_spin_lock_bh(&tx_mon_be->tx_mon_list_lock);
+			tx_mon_be->last_data_ppdu_info =
+						tx_mon_be->tx_data_ppdu_info;
+			STAILQ_INSERT_TAIL(&tx_mon_be->tx_ppdu_info_queue,
+					   tx_data_ppdu_info,
+					   tx_ppdu_info_queue_elem);
+			tx_mon_be->tx_ppdu_info_list_depth++;
+			tx_mon_be->tx_data_ppdu_info = NULL;
+			qdf_spin_unlock_bh(&tx_mon_be->tx_mon_list_lock);
+			schedule_wrq = true;
+		}
 	} else {
 		dp_tx_mon_free_ppdu_info(tx_data_ppdu_info, tx_mon_be);
 		tx_mon_be->tx_data_ppdu_info = NULL;

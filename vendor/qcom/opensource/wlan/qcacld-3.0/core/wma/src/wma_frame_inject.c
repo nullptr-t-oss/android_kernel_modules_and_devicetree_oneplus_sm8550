@@ -562,7 +562,9 @@ void wma_injection_notify_channel_change(tp_wma_handle wma_handle,
 					 uint8_t mon_vdev_id,
 					 uint32_t new_freq)
 {
+	struct wma_injection_queue_ctx *ctx = &g_wma_injection_ctx;
 	QDF_STATUS status;
+	int drain_wait_ms = 0;
 
 	if (!wma_handle || !new_freq)
 		return;
@@ -581,6 +583,23 @@ void wma_injection_notify_channel_change(tp_wma_handle wma_handle,
 	wma_info("Injection channel change: re-tuning helper vdev %u from %u to %u MHz (monitor vdev %u)",
 		 g_inj_tx_vdev.vdev_id, g_inj_tx_vdev.chanfreq,
 		 new_freq, mon_vdev_id);
+
+	/*
+	 * Drain in-flight frames before switching channel.
+	 * Frames submitted to FW are DMA-mapped on the old channel;
+	 * wait for completions to arrive before retuning to avoid
+	 * transmitting on the wrong frequency.
+	 */
+	if (ctx->is_initialized) {
+		while (qdf_atomic_read(&ctx->inflight_count) > 0 &&
+		       drain_wait_ms < 100) {
+			qdf_mdelay(5);
+			drain_wait_ms += 5;
+		}
+		if (qdf_atomic_read(&ctx->inflight_count) > 0)
+			wma_warn("Channel change with %d in-flight injection frames",
+				 qdf_atomic_read(&ctx->inflight_count));
+	}
 
 	/*
 	 * wma_injection_ensure_tx_vdev handles the channel change:

@@ -175,6 +175,9 @@ dp_tx_mon_print_ring_stat_2_0(struct dp_pdev *pdev);
 #define MAX_MONITOR_HEADER (512)
 #define MAX_DUMMY_FRM_BODY (128)
 
+/* Maximum PPDU info queue depth before dropping new entries */
+#define DP_TX_MON_MAX_PPDU_QUEUE_DEPTH (128)
+
 #define MAX_STATUS_BUFFER_IN_PPDU (64)
 #define TXMON_NO_BUFFER_SZ (64)
 
@@ -483,6 +486,19 @@ struct dp_peer_tx_capture_be {
 };
 #else
 
+/* Maximum number of peers for TX capture filtering */
+#define DP_TX_MON_MAX_PEER_FILTER 16
+
+/**
+ * dp_peer_tx_capture_be: Tx monitor peer structure
+ * @is_tx_cap_enabled: per-peer tx capture enabled flag
+ * @peer_mac: peer MAC address for filter matching
+ */
+struct dp_peer_tx_capture_be {
+	bool is_tx_cap_enabled;
+	uint8_t peer_mac[QDF_MAC_ADDR_SIZE];
+};
+
 /**
  * struct dp_txmon_frag_vec - a contiguous range of physical memory address
  * @frag_buf: frag buffer address
@@ -553,14 +569,10 @@ struct dp_pdev_tx_monitor_be {
 	uint8_t last_frag_q_idx;
 	uint8_t cur_frag_q_idx;
 	struct dp_txmon_frag_vec frag_q_vec[MAX_STATUS_BUFFER_IN_PPDU];
-};
 
-/**
- * dp_peer_tx_capture_be: Tx monitor peer structure
- *
- * need to be added here
- */
-struct dp_peer_tx_capture_be {
+	/* per-peer TX capture filter list stored at pdev level */
+	uint8_t peer_filter_count;
+	struct dp_peer_tx_capture_be peer_filters[DP_TX_MON_MAX_PEER_FILTER];
 };
 #endif /* WLAN_TX_PKT_CAPTURE_ENH_BE */
 

@@ -309,6 +309,12 @@ QDF_STATUS hdd_apply_injection_rate_limit(struct hdd_adapter *adapter)
 
 	security_ctx = &adapter->injection_ctx->security_ctx;
 	current_time = hdd_get_current_time_ms();
+
+	/*
+	 * Refresh rate limit params from global sysfs-configurable values
+	 * so that runtime changes via sysfs take effect immediately.
+	 */
+	hdd_injection_get_global_config(&security_ctx->config);
 	max_rate = security_ctx->config.max_frame_rate;
 	window_ms = security_ctx->config.rate_window_ms;
 
