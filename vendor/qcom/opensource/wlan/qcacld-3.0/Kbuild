@@ -2210,6 +2210,7 @@ DP_INC := -I$(WLAN_COMMON_INC)/dp/inc \
 	-I$(WLAN_COMMON_INC)/target_if/dp/inc \
 	-I$(WLAN_COMMON_INC)/dp/wifi3.0/monitor \
 	-I$(WLAN_COMMON_INC)/dp/wifi3.0/monitor/1.0 \
+	-I$(WLAN_COMMON_INC)/dp/wifi3.0/monitor/2.0 \
 	-I$(WLAN_COMMON_INC)/dp/cmn_dp_api
 
 DP_SRC := $(WLAN_COMMON_ROOT)/dp/wifi3.0
