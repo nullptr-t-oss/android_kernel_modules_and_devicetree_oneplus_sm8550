@@ -1803,9 +1803,7 @@ QDF_STATUS hdd_update_injection_throughput(struct hdd_adapter *adapter)
 	struct hdd_injection_ctx *injection_ctx;
 	struct injection_stats *stats;
 	uint64_t current_time;
-	uint64_t time_window_ms = 1000; /* 1 second window */
-	static uint64_t last_throughput_update = 0;
-	static uint64_t frames_in_window = 0;
+	uint64_t time_window_us = 1000000; /* 1 second in microseconds */
 
 	if (!adapter) {
 		hdd_inject_err("Invalid adapter parameter");
@@ -1822,29 +1820,30 @@ QDF_STATUS hdd_update_injection_throughput(struct hdd_adapter *adapter)
 	current_time = qdf_get_log_timestamp();
 
 	/* Initialize on first call */
-	if (last_throughput_update == 0) {
-		last_throughput_update = current_time;
-		frames_in_window = 1;
+	if (stats->throughput_window_start == 0) {
+		stats->throughput_window_start = current_time;
+		stats->throughput_frames_in_window = 1;
 		return QDF_STATUS_SUCCESS;
 	}
 
-	frames_in_window++;
+	stats->throughput_frames_in_window++;
 
 	/* Calculate throughput every second */
-	if (current_time - last_throughput_update >= time_window_ms * 1000) {
-		uint32_t throughput_fps = (frames_in_window * 1000000) / 
-					  (current_time - last_throughput_update);
-		
+	if (current_time - stats->throughput_window_start >= time_window_us) {
+		uint32_t throughput_fps =
+			(stats->throughput_frames_in_window * 1000000) /
+			(current_time - stats->throughput_window_start);
+
 		stats->current_throughput_fps = throughput_fps;
-		
+
 		/* Update peak throughput */
 		if (throughput_fps > stats->peak_throughput_fps) {
 			stats->peak_throughput_fps = throughput_fps;
 		}
 
 		/* Reset for next window */
-		last_throughput_update = current_time;
-		frames_in_window = 0;
+		stats->throughput_window_start = current_time;
+		stats->throughput_frames_in_window = 0;
 	}
 
 	return QDF_STATUS_SUCCESS;

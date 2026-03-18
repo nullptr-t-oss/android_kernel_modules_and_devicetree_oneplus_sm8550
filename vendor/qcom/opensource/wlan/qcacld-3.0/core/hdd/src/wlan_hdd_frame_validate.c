@@ -190,8 +190,8 @@ static QDF_STATUS hdd_validate_mgmt_frame(uint8_t *frame_data,
 		if (frame_len >= min_size) {
 			/* Validate beacon interval (should be reasonable) */
 			uint16_t beacon_interval = *(uint16_t *)(payload + 8);
-			if (beacon_interval == 0 || beacon_interval > 65535) {
-				hdd_validate_warn("Invalid beacon interval: %u", beacon_interval);
+			if (beacon_interval == 0 || beacon_interval > 10000) {
+				hdd_validate_warn("Invalid beacon interval: %u TU", beacon_interval);
 			}
 		}
 		break;

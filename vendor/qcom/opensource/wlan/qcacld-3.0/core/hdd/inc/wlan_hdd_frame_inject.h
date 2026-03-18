@@ -238,6 +238,9 @@ struct injection_stats {
 	uint32_t cpu_usage_percent;
 	uint64_t queue_depth_samples;
 	uint32_t max_queue_depth;
+	/* Per-adapter throughput tracking (not file-static) */
+	uint64_t throughput_window_start;
+	uint64_t throughput_frames_in_window;
 };
 
 /**
