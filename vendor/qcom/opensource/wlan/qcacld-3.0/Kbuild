@@ -86,6 +86,10 @@ $(foreach cfg, $(WLAN_CFG_OVERRIDE), \
 # set in the kernel sources.  When a GKI kernel is used, there isn't a
 # flag set in the sources, so set the flag here if we are building
 # with GKI kernel where the feature is present
+$(info QCA_DEBUG: Shell Path is $(SHELL))
+$(info QCA_DEBUG: Shell Version is $(shell $(SHELL) --version | head -n 1))
+$(info QCA_DEBUG: Bash Version Info is $(shell echo $$BASH_VERSION))
+$(info QCA_DEBUG: Current User is $(shell whoami))
 KERNEL_VERSION = $(shell echo $$(( ( $1 << 16 ) + ( $2 << 8 ) + $3 )))
 LINUX_CODE := $(call KERNEL_VERSION,$(VERSION),$(PATCHLEVEL),$(SUBLEVEL))
 
