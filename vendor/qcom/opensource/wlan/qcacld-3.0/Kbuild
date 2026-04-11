@@ -2244,8 +2244,8 @@ ifeq ($(CONFIG_BERYLLIUM), y)
 DP_OBJS += $(DP_SRC)/be/dp_be.o
 DP_OBJS += $(DP_SRC)/be/dp_be_tx.o
 DP_OBJS += $(DP_SRC)/be/dp_be_rx.o
-DP_OBJS += $(DP_SRC)/monitor/2.0/dp_mon_filter_2.0.o
-DP_OBJS += $(DP_SRC)/monitor/2.0/dp_mon_2.0.o
+#DP_OBJS += $(DP_SRC)/monitor/2.0/dp_mon_filter_2.0.o
+#DP_OBJS += $(DP_SRC)/monitor/2.0/dp_mon_2.0.o
 endif
 
 ifeq ($(CONFIG_LITHIUM), y)

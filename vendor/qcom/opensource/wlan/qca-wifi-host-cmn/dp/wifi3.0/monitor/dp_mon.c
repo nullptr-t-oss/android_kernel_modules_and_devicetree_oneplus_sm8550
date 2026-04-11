@@ -50,6 +50,38 @@
 #define DP_UNDECODED_ERR_LENGTH (MAX_STRING_LEN_PER_FIELD * CDP_PHYRX_ERR_MAX)
 #endif
 
+/**
+ * dp_mon_ops_register_2_0(): register monitor ops
+ * @mon_soc: monitor soc handle
+ *
+ * return: void
+ */
+void dp_mon_ops_register_2_0(struct dp_mon_soc *mon_soc)
+{
+}
+EXPORT_SYMBOL(dp_mon_ops_register_2_0);
+/**
+ * dp_mon_cdp_ops_register_2_0(): register monitor cdp ops
+ * @ops: cdp ops handle
+ *
+ * return: void
+ */
+void dp_mon_cdp_ops_register_2_0(struct cdp_ops *ops)
+{
+}
+EXPORT_SYMBOL(dp_mon_cdp_ops_register_2_0);
+
+/**
+ * dp_cfr_filter_register_2_0(): register cfr filter setting API
+ * @ops: cdp ops handle
+ *
+ * return: void
+ */
+void dp_cfr_filter_register_2_0(struct cdp_ops *ops)
+{
+}
+EXPORT_SYMBOL(dp_cfr_filter_register_2_0);
+
 #ifdef QCA_MCOPY_SUPPORT
 static inline void
 dp_pdev_disable_mcopy_code(struct dp_pdev *pdev)
