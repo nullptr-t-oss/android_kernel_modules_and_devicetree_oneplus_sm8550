@@ -400,6 +400,20 @@ void hdd_get_tx_resource(uint8_t vdev_id,
 	}
 }
 
+unsigned int
+hdd_get_tx_flow_low_watermark(hdd_cb_handle cb_ctx, uint8_t intf_id)
+{
+	struct hdd_context *hdd_ctx = hdd_cb_handle_to_context(cb_ctx);
+	struct hdd_adapter *adapter;
+
+	adapter = hdd_get_adapter_by_vdev(hdd_ctx, intf_id);
+	if (!adapter)
+		return 0;
+
+	return adapter->tx_flow_low_watermark;
+}
+#endif /* QCA_LL_LEGACY_TX_FLOW_CONTROL */
+
 #ifdef FEATURE_FRAME_INJECTION_SUPPORT
 struct ieee80211_radiotap_header {
 	uint8_t it_version;
@@ -560,20 +574,6 @@ drop:
 	kfree_skb(skb);
 }
 #endif
-
-unsigned int
-hdd_get_tx_flow_low_watermark(hdd_cb_handle cb_ctx, uint8_t intf_id)
-{
-	struct hdd_context *hdd_ctx = hdd_cb_handle_to_context(cb_ctx);
-	struct hdd_adapter *adapter;
-
-	adapter = hdd_get_adapter_by_vdev(hdd_ctx, intf_id);
-	if (!adapter)
-		return 0;
-
-	return adapter->tx_flow_low_watermark;
-}
-#endif /* QCA_LL_LEGACY_TX_FLOW_CONTROL */
 
 #ifdef RECEIVE_OFFLOAD
 qdf_napi_struct
