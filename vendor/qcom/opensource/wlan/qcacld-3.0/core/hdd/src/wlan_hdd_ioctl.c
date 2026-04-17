@@ -7346,7 +7346,7 @@ static int hdd_driver_ioctl(struct hdd_adapter *adapter, void __user *data)
  *
  * Return: 0 on success, non-zero on error
  */
-static int __hdd_ioctl(struct net_device *dev, void __user *data, int cmd)
+static int __hdd_ioctl(struct net_device *dev, struct ifreq *ifr, void __user *data, int cmd)
 {
 	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
 	struct hdd_context *hdd_ctx;
@@ -7392,6 +7392,10 @@ static int __hdd_ioctl(struct net_device *dev, void __user *data, int cmd)
 #ifdef FEATURE_FRAME_INJECTION_SUPPORT
 	case SIOCDEVPRIVATE_FRAME_INJECT:
 		hdd_info("Processing frame injection ioctl: 0x%x", cmd);
+		if (!ifr) {
+			ret = -EINVAL;
+			break;
+		}
 		ret = hdd_frame_inject_ioctl(dev, ifr, cmd);
 		break;
 #else
@@ -7419,7 +7423,7 @@ int hdd_ioctl(struct net_device *net_dev, struct ifreq *ifr, int cmd)
 	if (errno)
 		return errno;
 
-	errno = __hdd_ioctl(net_dev, ifr->ifr_data, cmd);
+	errno = __hdd_ioctl(net_dev, ifr, ifr->ifr_data, cmd);
 
 	osif_vdev_sync_op_stop(vdev_sync);
 
@@ -7436,7 +7440,7 @@ int hdd_dev_private_ioctl(struct net_device *dev, struct ifreq *ifr,
 	if (errno)
 		return errno;
 
-	errno = __hdd_ioctl(dev, data, cmd);
+	errno = __hdd_ioctl(dev, NULL, data, cmd);
 
 	osif_vdev_sync_op_stop(vdev_sync);
 
