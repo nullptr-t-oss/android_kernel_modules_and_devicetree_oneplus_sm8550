@@ -415,19 +415,6 @@ hdd_get_tx_flow_low_watermark(hdd_cb_handle cb_ctx, uint8_t intf_id)
 #endif /* QCA_LL_LEGACY_TX_FLOW_CONTROL */
 
 #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-struct ieee80211_radiotap_header {
-	uint8_t it_version;
-	uint8_t it_pad;
-	__le16 it_len;
-	__le32 it_present;
-}	__packed;
-
-static inline uint16_t ieee80211_get_radiotap_len(const uint8_t *data)
-{
-	struct ieee80211_radiotap_header *hdr = (void *)data;
-	return get_unaligned_le16(&hdr->it_len);
-}
-
 /**
  * hdd_is_monitor_tx_dev() - detect monitor-mode netdev tx context
  * @adapter: HDD adapter bound to @dev
