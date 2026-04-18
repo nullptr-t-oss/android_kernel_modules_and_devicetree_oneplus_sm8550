@@ -473,9 +473,14 @@ static void wma_injection_destroy_tx_vdev(tp_wma_handle wma)
 	 */
 
 	/* 1. PEER_DELETE */
-	wmi_unified_peer_delete_send(wma->wmi_handle,
-				     g_inj_tx_vdev.mac_addr,
-				     g_inj_tx_vdev.vdev_id);
+	{
+		struct peer_delete_cmd_params del_param = {0};
+		del_param.vdev_id = g_inj_tx_vdev.vdev_id;
+
+		wmi_unified_peer_delete_send(wma->wmi_handle,
+					     g_inj_tx_vdev.mac_addr,
+					     &del_param);
+	}
 	qdf_mdelay(10);
 
 	/* 2. VDEV_STOP (we did VDEV_START during create) */
@@ -528,9 +533,14 @@ void wma_injection_pre_stop_cleanup(tp_wma_handle wma_handle)
 		 g_inj_tx_vdev.vdev_id);
 
 	/* 1. PEER_DELETE */
-	wmi_unified_peer_delete_send(wma_handle->wmi_handle,
-				     g_inj_tx_vdev.mac_addr,
-				     g_inj_tx_vdev.vdev_id);
+	{
+		struct peer_delete_cmd_params del_param = {0};
+		del_param.vdev_id = g_inj_tx_vdev.vdev_id;
+
+		wmi_unified_peer_delete_send(wma_handle->wmi_handle,
+					     g_inj_tx_vdev.mac_addr,
+					     &del_param);
+	}
 	qdf_mdelay(10);
 
 	/* 2. VDEV_STOP (we did VDEV_START during create) */
@@ -733,7 +743,7 @@ static bool wma_check_traffic_coordination(tp_wma_handle wma_handle, uint8_t vde
 	}
 
 	/* Check if there's high priority management traffic pending */
-	if (iface->roaming_in_progress) {
+	if (wlan_cm_is_roam_sync_in_progress(wma_handle->psoc, vdev_id)) {
 		wma_debug("High priority operation in progress on vdev %u, deferring injection",
 			  vdev_id);
 		return false;
