@@ -39,6 +39,7 @@
 #include "qdf_nbuf.h"
 #include "qdf_delayed_work.h"
 #include "qdf_time.h"
+#include "qdf_threads.h"
 #include "cds_api.h"
 #include "cdp_txrx_cmn.h"
 #include <wlan_vdev_mgr_tgt_if_tx_defs.h>
@@ -313,7 +314,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 			wmi_unified_vdev_set_param_send(wma->wmi_handle, &vp);
 
 			g_inj_tx_vdev.chanfreq = chanfreq;
-		qdf_mdelay(15);
+		qdf_sleep(15);
 			return QDF_STATUS_SUCCESS;
 		}
 
@@ -335,7 +336,8 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 		for (i = fw_max_vid; i >= 0; i--) {
 			if ((uint8_t)i == mon_vdev_id)
 				continue;
-			if (!wma->interfaces[i].vdev) {
+			if (!wma->interfaces[i].vdev &&
+			    !wma->interfaces[i].vdev_active) {
 				vid = (uint8_t)i;
 				found = true;
 				break;
@@ -392,7 +394,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 	 * done and firmware asserts in wlan_vdev_find_vdev.
 	 */
 
-	qdf_mdelay(15);
+	qdf_sleep(15);
 
 	/* ---------- 2. VDEV START (20 MHz basic mode) ---------- */
 	qdf_mem_zero(&vstart, sizeof(vstart));
@@ -413,7 +415,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 		goto err_stop;
 	}
 
-	qdf_mdelay(15);
+	qdf_sleep(15);
 
 	/* ---------- 3. PEER CREATE (self-peer → fw vdev+0xc) ---------- */
 	qdf_mem_zero(&pcreate, sizeof(pcreate));
@@ -427,7 +429,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 		goto err_stop;
 	}
 
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	/*
 	 * Skip VDEV_UP.  For STA vdevs, firmware's wlan_vdev_up
@@ -441,6 +443,7 @@ wma_injection_ensure_tx_vdev(tp_wma_handle wma,
 	g_inj_tx_vdev.monitor_vdev_id  = mon_vdev_id;
 	g_inj_tx_vdev.chanfreq         = chanfreq;
 	qdf_mem_copy(g_inj_tx_vdev.mac_addr, inj_mac, QDF_MAC_ADDR_SIZE);
+	wma->interfaces[vid].vdev_active = true;
 
 	wma_info("Injection TX helper vdev created: vdev_id=%u mac=%pM freq=%u type=STA",
 		 vid, inj_mac, chanfreq);
@@ -473,23 +476,29 @@ static void wma_injection_destroy_tx_vdev(tp_wma_handle wma)
 	 */
 
 	/* 1. PEER_DELETE */
-	wmi_unified_peer_delete_send(wma->wmi_handle,
-				     g_inj_tx_vdev.mac_addr,
-				     g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	{
+		struct peer_delete_cmd_params del_param = {0};
+
+		del_param.vdev_id = g_inj_tx_vdev.vdev_id;
+		wmi_unified_peer_delete_send(wma->wmi_handle,
+					     g_inj_tx_vdev.mac_addr,
+					     &del_param);
+	}
+	qdf_sleep(10);
 
 	/* 2. VDEV_STOP (we did VDEV_START during create) */
 	wmi_unified_vdev_stop_send(wma->wmi_handle,
 				   g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	/* 3. VDEV_DELETE */
 	wmi_unified_vdev_delete_send(wma->wmi_handle,
 				     g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	wma_info("Injection TX helper vdev destroyed: vdev_id=%u",
 		 g_inj_tx_vdev.vdev_id);
+	wma->interfaces[g_inj_tx_vdev.vdev_id].vdev_active = false;
 	qdf_mem_zero(&g_inj_tx_vdev, sizeof(g_inj_tx_vdev));
 }
 
@@ -528,24 +537,96 @@ void wma_injection_pre_stop_cleanup(tp_wma_handle wma_handle)
 		 g_inj_tx_vdev.vdev_id);
 
 	/* 1. PEER_DELETE */
-	wmi_unified_peer_delete_send(wma_handle->wmi_handle,
-				     g_inj_tx_vdev.mac_addr,
-				     g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	{
+		struct peer_delete_cmd_params del_param = {0};
+
+		del_param.vdev_id = g_inj_tx_vdev.vdev_id;
+		wmi_unified_peer_delete_send(wma_handle->wmi_handle,
+					     g_inj_tx_vdev.mac_addr,
+					     &del_param);
+	}
+	qdf_sleep(10);
 
 	/* 2. VDEV_STOP (we did VDEV_START during create) */
 	wmi_unified_vdev_stop_send(wma_handle->wmi_handle,
 				   g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	/* 3. VDEV_DELETE */
 	wmi_unified_vdev_delete_send(wma_handle->wmi_handle,
 				     g_inj_tx_vdev.vdev_id);
-	qdf_mdelay(10);
+	qdf_sleep(10);
 
 	wma_info("Pre-stop cleanup: injection helper vdev destroyed: vdev_id=%u",
 		 g_inj_tx_vdev.vdev_id);
+	wma_handle->interfaces[g_inj_tx_vdev.vdev_id].vdev_active = false;
 	qdf_mem_zero(&g_inj_tx_vdev, sizeof(g_inj_tx_vdev));
+}
+
+/**
+ * wma_injection_notify_channel_change() - Re-tune injection helper vdev
+ * @wma_handle: WMA handle
+ * @mon_vdev_id: Monitor vdev ID whose channel changed
+ * @new_freq: New channel frequency in MHz
+ *
+ * Proactively re-tunes the hidden injection TX helper vdev to @new_freq.
+ * If no helper vdev exists yet this is a no-op (it will be created lazily
+ * on the first injection attempt at the new frequency).
+ */
+void wma_injection_notify_channel_change(tp_wma_handle wma_handle,
+					 uint8_t mon_vdev_id,
+					 uint32_t new_freq)
+{
+	struct wma_injection_queue_ctx *ctx = &g_wma_injection_ctx;
+	QDF_STATUS status;
+	int drain_wait_ms = 0;
+
+	if (!wma_handle || !new_freq)
+		return;
+
+	/*
+	 * If no helper vdev exists, nothing to re-tune.  It will be
+	 * created at the correct frequency on the next injection attempt.
+	 */
+	if (!g_inj_tx_vdev.created)
+		return;
+
+	/* Already on the right channel — nothing to do */
+	if (g_inj_tx_vdev.chanfreq == new_freq)
+		return;
+
+	wma_info("Injection channel change: re-tuning helper vdev %u from %u to %u MHz (monitor vdev %u)",
+		 g_inj_tx_vdev.vdev_id, g_inj_tx_vdev.chanfreq,
+		 new_freq, mon_vdev_id);
+
+	/*
+	 * Drain in-flight frames before switching channel.
+	 * Frames submitted to FW are DMA-mapped on the old channel;
+	 * wait for completions to arrive before retuning to avoid
+	 * transmitting on the wrong frequency.
+	 */
+	if (ctx->is_initialized) {
+		while (qdf_atomic_read(&ctx->inflight_count) > 0 &&
+		       drain_wait_ms < 100) {
+			qdf_mdelay(5);
+			drain_wait_ms += 5;
+		}
+		if (qdf_atomic_read(&ctx->inflight_count) > 0)
+			wma_warn("Channel change with %d in-flight injection frames",
+				 qdf_atomic_read(&ctx->inflight_count));
+	}
+
+	/*
+	 * wma_injection_ensure_tx_vdev handles the channel change:
+	 * if the helper vdev exists but is on a different frequency,
+	 * it issues a VDEV_START restart to re-tune the synthesizer.
+	 * If that fails it tears down and recreates the vdev.
+	 */
+	status = wma_injection_ensure_tx_vdev(wma_handle, mon_vdev_id,
+					      new_freq);
+	if (QDF_IS_STATUS_ERROR(status))
+		wma_err("Failed to re-tune injection helper vdev to %u MHz: %d",
+			new_freq, status);
 }
 
 static void
@@ -729,13 +810,6 @@ static bool wma_check_traffic_coordination(tp_wma_handle wma_handle, uint8_t vde
 	/* Check if interface is in a state that allows injection */
 	if (!iface->vdev) {
 		wma_debug("Interface %u not active, deferring injection", vdev_id);
-		return false;
-	}
-
-	/* Check if there's high priority management traffic pending */
-	if (iface->roaming_in_progress) {
-		wma_debug("High priority operation in progress on vdev %u, deferring injection",
-			  vdev_id);
 		return false;
 	}
 
@@ -1539,11 +1613,16 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	mgmt_params.frm_len = req->frame_len;
 	mgmt_params.vdev_id = vdev_id;
 	/*
-	 * Use ACK-completion tx type for injection consistently. Several
-	 * firmware builds are stricter with probe-request tx_type handling and
-	 * are less likely to discard when sent with ACK-completion semantics.
+	 * Default to ACK-completion tx type.  If the injection request has
+	 * the NO_ACK flag set (e.g. from radiotap TX_FLAGS), switch to the
+	 * no-ack variant so firmware does not wait for an ACK and the frame
+	 * is fire-and-forget — required for deauth/disassoc injection and
+	 * broadcast frames used by tools like aireplay-ng and mdk4.
 	 */
-	mgmt_params.tx_type = GENERIC_NODOWLOAD_ACK_COMP_INDEX;
+	if (req->tx_flags & HDD_FRAME_INJECT_TX_NO_ACK)
+		mgmt_params.tx_type = GENERIC_NODOWNLD_NOACK_COMP_INDEX;
+	else
+		mgmt_params.tx_type = GENERIC_NODOWLOAD_ACK_COMP_INDEX;
 	/*
 	 * Align with regular host management TX behavior:
 	 * probe request uses chanfreq=0 while action/auth/probe-rsp can carry
@@ -1565,10 +1644,186 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	wma_injection_debug_cache_update(mgmt_params.desc_id, req, fc_type,
 					 fc_subtype, mgmt_params.chanfreq);
 
-	/* Set transmission rate if specified in injection request */
+	/*
+	 * Map injection TX rate to WMI tx_send_params.
+	 *
+	 * tx_rate encoding (set by radiotap parser in wlan_hdd_tx_rx.c):
+	 *
+	 * Legacy rates (bit 15 clear):
+	 *   Value is in 100kbps units (radiotap rate × 5).
+	 *   Mapped to WMI mcs_mask bitmask of allowed legacy rates.
+	 *
+	 * HT MCS rates (bit 15 set, bit 16 clear):
+	 *   bits [6:0]   = MCS index (0-76)
+	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz)
+	 *   bit  [10]    = Short GI
+	 *   bit  [11]    = Greenfield
+	 *   bit  [12]    = LDPC
+	 *   bits [14:13] = STBC streams
+	 *   bit  [15]    = MCS indicator flag
+	 *
+	 * VHT MCS rates (bit 15 set, bit 16 set, bit 20 clear):
+	 *   bits [3:0]   = VHT MCS index (0-9)
+	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz, 2=80MHz, 3=160MHz)
+	 *   bit  [10]    = Short GI
+	 *   bit  [12]    = LDPC
+	 *   bits [14:13] = STBC streams
+	 *   bit  [15]    = MCS indicator flag
+	 *   bit  [16]    = VHT indicator flag
+	 *   bits [19:17] = NSS-1 (0=NSS1 .. 7=NSS8)
+	 *
+	 * HE (802.11ax) rates (bit 15 set, bit 20 set):
+	 *   bits [3:0]   = HE MCS index (0-11)
+	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz, 2=80MHz, 3=160MHz)
+	 *   bit  [10]    = Short GI (0.8µs)
+	 *   bit  [12]    = LDPC
+	 *   bit  [15]    = MCS indicator flag
+	 *   bit  [20]    = HE indicator flag
+	 *   bits [19:17] = NSS-1 (0=NSS1 .. 7=NSS8)
+	 */
+#define HDD_INJECT_RATE_MCS_FLAG    BIT(15)
+#define HDD_INJECT_RATE_VHT_FLAG    BIT(16)
+#define HDD_INJECT_RATE_HE_FLAG     BIT(20)
+
 	if (req->tx_rate != 0) {
-		mgmt_params.tx_param.mcs_mask = req->tx_rate;
-		mgmt_params.tx_params_valid = true;
+		if (req->tx_rate & HDD_INJECT_RATE_MCS_FLAG) {
+			bool sgi  = !!(req->tx_rate & BIT(10));
+			bool ldpc = !!(req->tx_rate & BIT(12));
+			uint8_t stbc = (req->tx_rate >> 13) & 0x03;
+			uint8_t bw   = (req->tx_rate >> 8) & 0x03;
+
+			if (req->tx_rate & HDD_INJECT_RATE_HE_FLAG) {
+				/*
+				 * 802.11ax HE rate from radiotap field 23.
+				 */
+				uint8_t he_mcs = req->tx_rate & 0x0F;
+				uint8_t nss = ((req->tx_rate >> 17) & 0x07) + 1;
+
+				mgmt_params.tx_param.mcs_mask =
+					BIT(he_mcs < 12 ? he_mcs : 11);
+				mgmt_params.tx_param.preamble_type = BIT(4); /* HE */
+				mgmt_params.tx_param.nss_mask = BIT(nss - 1);
+				mgmt_params.tx_param.bw_mask =
+					(bw == 3) ? BIT(5) :
+					(bw == 2) ? BIT(4) :
+					(bw == 1) ? BIT(3) : BIT(2);
+				mgmt_params.tx_param.retry_limit = 4;
+				mgmt_params.tx_params_valid = true;
+
+				wma_debug("Injection HE rate: mcs=%u bw=%u sgi=%u ldpc=%u nss=%u",
+					  he_mcs, bw, sgi ? 1 : 0, ldpc ? 1 : 0, nss);
+			} else if (req->tx_rate & HDD_INJECT_RATE_VHT_FLAG) {
+				/*
+				 * 802.11ac VHT rate from radiotap field 21.
+				 */
+				uint8_t vht_mcs = req->tx_rate & 0x0F;
+				uint8_t nss = ((req->tx_rate >> 17) & 0x07) + 1;
+
+				mgmt_params.tx_param.mcs_mask =
+					BIT(vht_mcs < 10 ? vht_mcs : 9);
+				mgmt_params.tx_param.preamble_type = BIT(3); /* VHT */
+				mgmt_params.tx_param.nss_mask = BIT(nss - 1);
+				mgmt_params.tx_param.bw_mask =
+					(bw == 3) ? BIT(5) /* 160MHz */ :
+					(bw == 2) ? BIT(4) /* 80MHz */  :
+					(bw == 1) ? BIT(3) /* 40MHz */  : BIT(2) /* 20MHz */;
+				mgmt_params.tx_param.retry_limit = 4;
+				mgmt_params.tx_params_valid = true;
+
+				wma_debug("Injection VHT rate: mcs=%u bw=%u sgi=%u ldpc=%u stbc=%u nss=%u nss_mask=0x%x",
+					  vht_mcs, bw, sgi ? 1 : 0, ldpc ? 1 : 0,
+					  stbc, nss, mgmt_params.tx_param.nss_mask);
+			} else {
+				/*
+				 * 802.11n HT MCS rate from radiotap field 19.
+				 *
+				 * WMI mcs_mask for HT: each bit corresponds to an
+				 * MCS index (0-11 in the 12-bit field).  For MCS
+				 * indices > 11, firmware uses the mcs_mask as a
+				 * direct index hint.  Set the single bit for the
+				 * requested MCS index (clamped to the 12-bit field).
+				 */
+				uint8_t mcs_idx = req->tx_rate & 0x7F;
+
+				if (mcs_idx < 12)
+					mgmt_params.tx_param.mcs_mask = BIT(mcs_idx);
+				else
+					mgmt_params.tx_param.mcs_mask = BIT(7); /* MCS7 fallback */
+
+				mgmt_params.tx_param.preamble_type = BIT(2); /* HT */
+				mgmt_params.tx_param.nss_mask =
+					BIT(mcs_idx / 8); /* NSS derived from MCS index */
+				mgmt_params.tx_param.bw_mask =
+					(bw == 1) ? BIT(3) /* 40MHz */ : BIT(2) /* 20MHz */;
+				mgmt_params.tx_param.retry_limit = 4;
+				mgmt_params.tx_params_valid = true;
+
+				wma_debug("Injection HT MCS rate: idx=%u bw=%u sgi=%u ldpc=%u stbc=%u nss_mask=0x%x",
+					  mcs_idx, bw, sgi ? 1 : 0, ldpc ? 1 : 0,
+					  stbc, mgmt_params.tx_param.nss_mask);
+			}
+
+			/*
+			 * SGI and STBC have no per-frame field in tx_send_params.
+			 * Apply them as vdev params on the helper vdev so the
+			 * firmware rate-code engine can honor them.
+			 */
+			if (g_inj_tx_vdev.created) {
+				if (sgi)
+					wma_vdev_set_param(wma_handle->wmi_handle,
+							   g_inj_tx_vdev.vdev_id,
+							   WMI_VDEV_PARAM_SGI, 1);
+				if (stbc)
+					wma_vdev_set_param(wma_handle->wmi_handle,
+							   g_inj_tx_vdev.vdev_id,
+							   WMI_VDEV_PARAM_TX_STBC,
+							   stbc);
+			}
+		} else {
+			/* Legacy rate in 100kbps units */
+			static const struct {
+				uint16_t rate_100kbps;
+				uint16_t mcs_bit;
+				uint8_t  preamble; /* 0=OFDM, 1=CCK */
+			} rate_table[] = {
+				{  10, BIT(0),  1 },  /* CCK 1 Mbps */
+				{  20, BIT(1),  1 },  /* CCK 2 Mbps */
+				{  55, BIT(2),  1 },  /* CCK 5.5 Mbps */
+				{ 110, BIT(3),  1 },  /* CCK 11 Mbps */
+				{  60, BIT(4),  0 },  /* OFDM 6 Mbps */
+				{  90, BIT(5),  0 },  /* OFDM 9 Mbps */
+				{ 120, BIT(6),  0 },  /* OFDM 12 Mbps */
+				{ 180, BIT(7),  0 },  /* OFDM 18 Mbps */
+				{ 240, BIT(8),  0 },  /* OFDM 24 Mbps */
+				{ 360, BIT(9),  0 },  /* OFDM 36 Mbps */
+				{ 480, BIT(10), 0 },  /* OFDM 48 Mbps */
+				{ 540, BIT(11), 0 },  /* OFDM 54 Mbps */
+			};
+			int i;
+			bool matched = false;
+
+			for (i = 0; i < ARRAY_SIZE(rate_table); i++) {
+				if (req->tx_rate == rate_table[i].rate_100kbps) {
+					mgmt_params.tx_param.mcs_mask =
+						rate_table[i].mcs_bit;
+					mgmt_params.tx_param.preamble_type =
+						rate_table[i].preamble ?
+						BIT(1) /* CCK */ : BIT(0) /* OFDM */;
+					mgmt_params.tx_param.nss_mask = BIT(0);
+					mgmt_params.tx_param.bw_mask = BIT(2); /* 20MHz */
+					mgmt_params.tx_params_valid = true;
+					matched = true;
+					break;
+				}
+			}
+
+			if (!matched) {
+				/* Unknown rate — use 6 Mbps OFDM as safe default */
+				mgmt_params.use_6mbps = 1;
+				wma_debug("Injection: unmapped rate %u (100kbps), falling back to 6Mbps",
+					  req->tx_rate);
+			}
+		}
 	}
 
 	if (!inject_tx_cfg_logged) {

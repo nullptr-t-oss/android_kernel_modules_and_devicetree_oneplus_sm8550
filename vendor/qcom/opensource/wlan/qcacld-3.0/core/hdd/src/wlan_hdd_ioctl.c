@@ -7391,9 +7391,25 @@ static int __hdd_ioctl(struct net_device *dev, void __user *data, int cmd)
 		break;
 #ifdef FEATURE_FRAME_INJECTION_SUPPORT
 	case SIOCDEVPRIVATE_FRAME_INJECT:
+	{
+		/*
+		 * __hdd_ioctl() receives 'void __user *data' (already
+		 * unwrapped from ifr->ifr_data by the caller hdd_ioctl /
+		 * hdd_dev_private_ioctl).  hdd_frame_inject_ioctl() needs a
+		 * struct ifreq whose ifr_data points at the userspace buffer,
+		 * so reconstruct one on the stack.
+		 */
+		struct ifreq ifr_local;
+
+		memset(&ifr_local, 0, sizeof(ifr_local));
+		strlcpy(ifr_local.ifr_name, dev->name,
+			sizeof(ifr_local.ifr_name));
+		ifr_local.ifr_data = (void __force *)data;
+
 		hdd_info("Processing frame injection ioctl: 0x%x", cmd);
-		ret = hdd_frame_inject_ioctl(dev, ifr, cmd);
+		ret = hdd_frame_inject_ioctl(dev, &ifr_local, cmd);
 		break;
+	}
 #else
 	case SIOCDEVPRIVATE_FRAME_INJECT:
 		hdd_warn("Frame injection not compiled in");
