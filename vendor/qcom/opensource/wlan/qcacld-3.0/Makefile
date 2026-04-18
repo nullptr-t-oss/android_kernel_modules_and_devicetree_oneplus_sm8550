@@ -39,7 +39,7 @@ KBUILD_OPTIONS += \
     WLAN_CTRL_NAME=wlan
 endif
 
-KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS=$(M)/../platform/Module.symvers
+#KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS=$(M)/../platform/Module.symvers
 KBUILD_OPTIONS += $(KBUILD_EXTRA) # Extra config if any
 
 

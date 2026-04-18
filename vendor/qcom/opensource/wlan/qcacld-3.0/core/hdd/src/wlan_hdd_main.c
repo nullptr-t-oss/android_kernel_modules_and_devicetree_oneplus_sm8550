@@ -3060,7 +3060,7 @@ static int __hdd_mon_open(struct net_device *dev)
 		    dev->name, netif_carrier_ok(dev) ? 1 : 0,
 		    netif_running(dev) ? 1 : 0, adapter->pause_map);
 
-	hdd_set_current_throughput_level(hdd_ctx,
+	ucfg_dp_set_current_throughput_level(hdd_ctx->psoc,
  						 PLD_BUS_WIDTH_VERY_HIGH);
 
 	pld_request_bus_bandwidth(hdd_ctx->parent_dev,
@@ -6295,12 +6295,25 @@ static const struct net_device_ops wlan_drv_ops = {
 };
 
 #ifdef FEATURE_MONITOR_MODE_SUPPORT
-/* Monitor mode net_device_ops, does not Tx and most of operations. */
+/*
+ * Monitor mode net_device_ops.
+ *
+ * Includes ioctl handlers so that SIOCDEVPRIVATE_FRAME_INJECT works on
+ * monitor interfaces, and ndo_set_mac_address for MAC spoofing which is
+ * commonly used alongside monitor mode injection tools.
+ */
 static const struct net_device_ops wlan_mon_drv_ops = {
 	.ndo_open = hdd_mon_open,
 	.ndo_stop = hdd_stop,
 	.ndo_start_xmit = hdd_hard_start_xmit,
 	.ndo_get_stats = hdd_get_stats,
+	.ndo_set_mac_address = hdd_set_mac_address,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
+	.ndo_do_ioctl = hdd_ioctl,
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+	.ndo_siocdevprivate = hdd_dev_private_ioctl,
+#endif
 };
 
 /**
