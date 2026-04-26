@@ -323,6 +323,18 @@ static QDF_STATUS hdd_create_injection_request(struct hdd_frame_inject_ioctl *io
 		return QDF_STATUS_E_INVAL;
 	}
 
+	/* Validate userspace frame_data pointer before accessing it */
+	if (!ioctl_data->frame_data) {
+		hdd_inject_err("NULL frame_data pointer from userspace");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (!access_ok(ioctl_data->frame_data, ioctl_data->frame_len)) {
+		hdd_inject_err("Invalid userspace frame_data pointer %pK len %u",
+			       ioctl_data->frame_data, ioctl_data->frame_len);
+		return QDF_STATUS_E_FAULT;
+	}
+
 	/* Allocate injection request */
 	injection_req = qdf_mem_malloc(sizeof(*injection_req));
 	if (!injection_req) {
@@ -434,15 +446,34 @@ QDF_STATUS hdd_process_frame_injection(struct hdd_adapter *adapter,
 	}
 
 	/*
-	 * Injection currently transmits via WMI mgmt-tx path, so only 802.11
-	 * management frames are supported on this path.
-	 */
+	 * Determine 802.11 frame type for routing decisions downstream.
+	 * Management frames  (type 0x00) → WMI mgmt TX path
+	 * Data frames        (type 0x08) → CDP raw data TX path
+	 * Control frames     (type 0x04) → Best-effort via WMI mgmt TX
+	 *
+	 * All three types are accepted for injection.  Tools like
+	 * aireplay-ng inject data frames (ARP replay, chopchop,
+	 * fragmentation) and control frames (RTS for CTS-forcing).
+ 	 */
 	frame_type = req->frame_data[0] & 0x0c;
-	if (frame_type != 0x00) {
+	switch (frame_type) {
+	case 0x00: /* Management */
+		hdd_inject_debug("Management frame injection: subtype=0x%02x len=%u",
+				 req->frame_data[0] & 0xf0, req->frame_len);
+		break;
+	case 0x08: /* Data */
+		hdd_inject_debug("Data frame injection: subtype=0x%02x len=%u",
+				 req->frame_data[0] & 0xf0, req->frame_len);
+		break;
+	case 0x04: /* Control */
+		hdd_inject_debug("Control frame injection: subtype=0x%02x len=%u",
+				 req->frame_data[0] & 0xf0, req->frame_len);
+		break;
+	default:
 		hdd_update_injection_stats(adapter, HDD_INJECTION_STAT_VALIDATION_FAILURES, 1);
-		hdd_inject_warn("Dropping non-management injection frame: fc_type=0x%02x len=%u",
+		hdd_inject_warn("Dropping frame with invalid type: fc_type=0x%02x len=%u",
 				frame_type, req->frame_len);
-		return QDF_STATUS_E_NOSUPPORT;
+		return QDF_STATUS_E_INVAL;
 	}
 
 	/* Queue frame for injection */
@@ -667,9 +698,76 @@ void hdd_process_injection_queue_work(void *arg)
 				}
 			}
 
-			wma_status = wma_queue_injection_frame(
-				(tp_wma_handle)injection_ctx->wma_handle, req,
-				tx_vdev_id);
+			wma_status = QDF_STATUS_E_FAILURE;
+
+			/*
+			 * Route frames based on 802.11 type:
+			 *
+			 * Management (0x00): WMI mgmt TX via WMA queue
+			 *   - Uses helper STA vdev for monitor mode
+			 *   - Firmware handles rate control and retries
+			 *
+			 * Data (0x08): CDP raw non-standard TX
+			 *   - Goes through the data path directly
+			 *   - Required for aireplay-ng ARP replay,
+			 *     chopchop, fragmentation attacks
+			 *
+			 * Control (0x04): Best-effort via WMI mgmt TX
+			 *   - Most firmware won't actually TX pure control
+			 *     frames but will accept the WMI command
+			 *   - RTS injection for CTS-forcing may work
+			 *     depending on firmware build
+			 */
+			{
+				uint8_t fc_type = req->frame_data[0] & 0x0c;
+
+				if (fc_type == 0x08) {
+					/* Data frame: use CDP raw TX path */
+					qdf_nbuf_t nbuf;
+					void *data_soc;
+
+					data_soc = cds_get_context(QDF_MODULE_ID_SOC);
+					if (!data_soc) {
+						hdd_inject_err("CDP SOC not available for data TX");
+						wma_status = QDF_STATUS_E_FAILURE;
+						goto inject_done;
+					}
+
+					nbuf = qdf_nbuf_alloc(NULL, req->frame_len, 0, 0, false);
+					if (!nbuf) {
+						hdd_inject_err("Failed to alloc nbuf for data injection");
+						wma_status = QDF_STATUS_E_NOMEM;
+						goto inject_done;
+					}
+
+					qdf_mem_copy(qdf_nbuf_put_tail(nbuf, req->frame_len),
+						     req->frame_data, req->frame_len);
+
+					/*
+					 * cdp_tx_non_std sends a raw 802.11 frame through
+					 * the firmware data path.  OL_TX_SPEC_RAW tells the
+					 * datapath to transmit the buffer as-is without
+					 * 802.3→802.11 encapsulation.
+					 */
+					if (cdp_tx_non_std(data_soc, tx_vdev_id,
+							   OL_TX_SPEC_RAW, nbuf) != NULL) {
+						/* nbuf was not consumed — TX failed */
+						qdf_nbuf_free(nbuf);
+						hdd_inject_err("CDP raw data TX rejected for vdev %u",
+							       tx_vdev_id);
+						wma_status = QDF_STATUS_E_FAILURE;
+					} else {
+						/* nbuf consumed by CDP — success */
+						wma_status = QDF_STATUS_SUCCESS;
+					}
+				} else {
+					/* Management or control frame: WMI mgmt TX */
+					wma_status = wma_queue_injection_frame(
+						(tp_wma_handle)injection_ctx->wma_handle, req,
+						tx_vdev_id);
+				}
+			}
+inject_done:
 
 			/* Update timing for completion */
 			req->complete_time = qdf_get_log_timestamp();
@@ -1701,9 +1799,7 @@ QDF_STATUS hdd_update_injection_throughput(struct hdd_adapter *adapter)
 	struct hdd_injection_ctx *injection_ctx;
 	struct injection_stats *stats;
 	uint64_t current_time;
-	uint64_t time_window_ms = 1000; /* 1 second window */
-	static uint64_t last_throughput_update = 0;
-	static uint64_t frames_in_window = 0;
+	uint64_t time_window_us = 1000000; /* 1 second in microseconds */
 
 	if (!adapter) {
 		hdd_inject_err("Invalid adapter parameter");
@@ -1720,18 +1816,19 @@ QDF_STATUS hdd_update_injection_throughput(struct hdd_adapter *adapter)
 	current_time = qdf_get_log_timestamp();
 
 	/* Initialize on first call */
-	if (last_throughput_update == 0) {
-		last_throughput_update = current_time;
-		frames_in_window = 1;
+	if (stats->throughput_window_start == 0) {
+		stats->throughput_window_start = current_time;
+		stats->throughput_frames_in_window = 1;
 		return QDF_STATUS_SUCCESS;
 	}
 
-	frames_in_window++;
+	stats->throughput_frames_in_window++;
 
 	/* Calculate throughput every second */
-	if (current_time - last_throughput_update >= time_window_ms * 1000) {
-		uint32_t throughput_fps = (frames_in_window * 1000000) / 
-					  (current_time - last_throughput_update);
+	if (current_time - stats->throughput_window_start >= time_window_us) {
+		uint32_t throughput_fps =
+			(stats->throughput_frames_in_window * 1000000) /
+			(current_time - stats->throughput_window_start);
 		
 		stats->current_throughput_fps = throughput_fps;
 		
@@ -1741,8 +1838,8 @@ QDF_STATUS hdd_update_injection_throughput(struct hdd_adapter *adapter)
 		}
 
 		/* Reset for next window */
-		last_throughput_update = current_time;
-		frames_in_window = 0;
+		stats->throughput_window_start = current_time;
+		stats->throughput_frames_in_window = 0;
 	}
 
 	return QDF_STATUS_SUCCESS;
