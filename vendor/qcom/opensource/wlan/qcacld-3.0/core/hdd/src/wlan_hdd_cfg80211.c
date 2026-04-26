@@ -26085,6 +26085,23 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 	adapter->mon_chan_freq = chandef->chan->center_freq;
 	adapter->mon_bandwidth = ch_width;
 
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	/*
+	 * Proactively re-tune the injection helper STA vdev to the new
+	 * monitor channel.  Without this, injected frames would briefly
+	 * go out on the old frequency until the next injection attempt
+	 * detects the mismatch and triggers a lazy re-tune.
+	 */
+	{
+		tp_wma_handle wma = cds_get_context(QDF_MODULE_ID_WMA);
+
+		if (wma)
+			wma_injection_notify_channel_change(
+				wma, adapter->vdev_id,
+				chandef->chan->center_freq);
+	}
+#endif
+
 	hdd_exit();
 
 	return 0;
@@ -27966,7 +27983,6 @@ static struct cfg80211_ops wlan_hdd_cfg80211_ops = {
 #endif
 #ifdef FEATURE_MONITOR_MODE_SUPPORT
 	.set_monitor_channel = wlan_hdd_cfg80211_set_mon_ch,
-	.get_channel = wlan_hdd_cfg80211_get_channel,
 #endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 5, 0)) || \
 	defined(CFG80211_ABORT_SCAN)
