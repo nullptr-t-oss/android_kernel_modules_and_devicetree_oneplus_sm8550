@@ -154,6 +154,18 @@ QDF_STATUS wma_deinit_injection_queue(tp_wma_handle wma_handle);
 void wma_injection_pre_stop_cleanup(tp_wma_handle wma_handle);
 
 /**
+ * wma_injection_notify_channel_change() - Re-tune injection helper vdev
+ * @wma_handle: WMA handle
+ * @mon_vdev_id: Monitor vdev ID whose channel changed
+ * @new_freq: New channel frequency in MHz
+ *
+ * Proactively re-tunes the hidden injection TX helper vdev to @new_freq.
+ * If no helper vdev exists yet this is a no-op (it will be created lazily
+ * on the first injection attempt at the new frequency).
+ */
+void wma_injection_notify_channel_change(tp_wma_handle wma_handle, uint8_t mon_vdev_id, uint32_t new_freq);
+
+/**
  * wma_queue_injection_frame() - Queue frame for injection
  * @wma_handle: WMA handle
  * @req: Frame injection request
