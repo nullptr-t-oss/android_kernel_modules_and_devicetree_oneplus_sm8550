@@ -1613,16 +1613,11 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	mgmt_params.frm_len = req->frame_len;
 	mgmt_params.vdev_id = vdev_id;
 	/*
-	 * Default to ACK-completion tx type.  If the injection request has
-	 * the NO_ACK flag set (e.g. from radiotap TX_FLAGS), switch to the
-	 * no-ack variant so firmware does not wait for an ACK and the frame
-	 * is fire-and-forget — required for deauth/disassoc injection and
-	 * broadcast frames used by tools like aireplay-ng and mdk4.
+	 * Use ACK-completion tx type for injection consistently. Several
+	 * firmware builds are stricter with probe-request tx_type handling and
+	 * are less likely to discard when sent with ACK-completion semantics.
 	 */
-	if (req->tx_flags & HDD_FRAME_INJECT_TX_NO_ACK)
-		mgmt_params.tx_type = GENERIC_NODOWNLD_NOACK_COMP_INDEX;
-	else
-		mgmt_params.tx_type = GENERIC_NODOWLOAD_ACK_COMP_INDEX;
+	mgmt_params.tx_type = GENERIC_NODOWNLD_NOACK_COMP_INDEX;
 	/*
 	 * Align with regular host management TX behavior:
 	 * probe request uses chanfreq=0 while action/auth/probe-rsp can carry
@@ -1644,186 +1639,10 @@ QDF_STATUS wma_send_injection_frame_to_fw(tp_wma_handle wma_handle,
 	wma_injection_debug_cache_update(mgmt_params.desc_id, req, fc_type,
 					 fc_subtype, mgmt_params.chanfreq);
 
-	/*
-	 * Map injection TX rate to WMI tx_send_params.
-	 *
-	 * tx_rate encoding (set by radiotap parser in wlan_hdd_tx_rx.c):
-	 *
-	 * Legacy rates (bit 15 clear):
-	 *   Value is in 100kbps units (radiotap rate × 5).
-	 *   Mapped to WMI mcs_mask bitmask of allowed legacy rates.
-	 *
-	 * HT MCS rates (bit 15 set, bit 16 clear):
-	 *   bits [6:0]   = MCS index (0-76)
-	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz)
-	 *   bit  [10]    = Short GI
-	 *   bit  [11]    = Greenfield
-	 *   bit  [12]    = LDPC
-	 *   bits [14:13] = STBC streams
-	 *   bit  [15]    = MCS indicator flag
-	 *
-	 * VHT MCS rates (bit 15 set, bit 16 set, bit 20 clear):
-	 *   bits [3:0]   = VHT MCS index (0-9)
-	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz, 2=80MHz, 3=160MHz)
-	 *   bit  [10]    = Short GI
-	 *   bit  [12]    = LDPC
-	 *   bits [14:13] = STBC streams
-	 *   bit  [15]    = MCS indicator flag
-	 *   bit  [16]    = VHT indicator flag
-	 *   bits [19:17] = NSS-1 (0=NSS1 .. 7=NSS8)
-	 *
-	 * HE (802.11ax) rates (bit 15 set, bit 20 set):
-	 *   bits [3:0]   = HE MCS index (0-11)
-	 *   bits [9:8]   = BW (0=20MHz, 1=40MHz, 2=80MHz, 3=160MHz)
-	 *   bit  [10]    = Short GI (0.8µs)
-	 *   bit  [12]    = LDPC
-	 *   bit  [15]    = MCS indicator flag
-	 *   bit  [20]    = HE indicator flag
-	 *   bits [19:17] = NSS-1 (0=NSS1 .. 7=NSS8)
-	 */
-#define HDD_INJECT_RATE_MCS_FLAG    BIT(15)
-#define HDD_INJECT_RATE_VHT_FLAG    BIT(16)
-#define HDD_INJECT_RATE_HE_FLAG     BIT(20)
-
+	/* Set transmission rate if specified in injection request */
 	if (req->tx_rate != 0) {
-		if (req->tx_rate & HDD_INJECT_RATE_MCS_FLAG) {
-			bool sgi  = !!(req->tx_rate & BIT(10));
-			bool ldpc = !!(req->tx_rate & BIT(12));
-			uint8_t stbc = (req->tx_rate >> 13) & 0x03;
-			uint8_t bw   = (req->tx_rate >> 8) & 0x03;
-
-			if (req->tx_rate & HDD_INJECT_RATE_HE_FLAG) {
-				/*
-				 * 802.11ax HE rate from radiotap field 23.
-				 */
-				uint8_t he_mcs = req->tx_rate & 0x0F;
-				uint8_t nss = ((req->tx_rate >> 17) & 0x07) + 1;
-
-				mgmt_params.tx_param.mcs_mask =
-					BIT(he_mcs < 12 ? he_mcs : 11);
-				mgmt_params.tx_param.preamble_type = BIT(4); /* HE */
-				mgmt_params.tx_param.nss_mask = BIT(nss - 1);
-				mgmt_params.tx_param.bw_mask =
-					(bw == 3) ? BIT(5) :
-					(bw == 2) ? BIT(4) :
-					(bw == 1) ? BIT(3) : BIT(2);
-				mgmt_params.tx_param.retry_limit = 4;
-				mgmt_params.tx_params_valid = true;
-
-				wma_debug("Injection HE rate: mcs=%u bw=%u sgi=%u ldpc=%u nss=%u",
-					  he_mcs, bw, sgi ? 1 : 0, ldpc ? 1 : 0, nss);
-			} else if (req->tx_rate & HDD_INJECT_RATE_VHT_FLAG) {
-				/*
-				 * 802.11ac VHT rate from radiotap field 21.
-				 */
-				uint8_t vht_mcs = req->tx_rate & 0x0F;
-				uint8_t nss = ((req->tx_rate >> 17) & 0x07) + 1;
-
-				mgmt_params.tx_param.mcs_mask =
-					BIT(vht_mcs < 10 ? vht_mcs : 9);
-				mgmt_params.tx_param.preamble_type = BIT(3); /* VHT */
-				mgmt_params.tx_param.nss_mask = BIT(nss - 1);
-				mgmt_params.tx_param.bw_mask =
-					(bw == 3) ? BIT(5) /* 160MHz */ :
-					(bw == 2) ? BIT(4) /* 80MHz */  :
-					(bw == 1) ? BIT(3) /* 40MHz */  : BIT(2) /* 20MHz */;
-				mgmt_params.tx_param.retry_limit = 4;
-				mgmt_params.tx_params_valid = true;
-
-				wma_debug("Injection VHT rate: mcs=%u bw=%u sgi=%u ldpc=%u stbc=%u nss=%u nss_mask=0x%x",
-					  vht_mcs, bw, sgi ? 1 : 0, ldpc ? 1 : 0,
-					  stbc, nss, mgmt_params.tx_param.nss_mask);
-			} else {
-				/*
-				 * 802.11n HT MCS rate from radiotap field 19.
-				 *
-				 * WMI mcs_mask for HT: each bit corresponds to an
-				 * MCS index (0-11 in the 12-bit field).  For MCS
-				 * indices > 11, firmware uses the mcs_mask as a
-				 * direct index hint.  Set the single bit for the
-				 * requested MCS index (clamped to the 12-bit field).
-				 */
-				uint8_t mcs_idx = req->tx_rate & 0x7F;
-
-				if (mcs_idx < 12)
-					mgmt_params.tx_param.mcs_mask = BIT(mcs_idx);
-				else
-					mgmt_params.tx_param.mcs_mask = BIT(7); /* MCS7 fallback */
-
-				mgmt_params.tx_param.preamble_type = BIT(2); /* HT */
-				mgmt_params.tx_param.nss_mask =
-					BIT(mcs_idx / 8); /* NSS derived from MCS index */
-				mgmt_params.tx_param.bw_mask =
-					(bw == 1) ? BIT(3) /* 40MHz */ : BIT(2) /* 20MHz */;
-				mgmt_params.tx_param.retry_limit = 4;
-				mgmt_params.tx_params_valid = true;
-
-				wma_debug("Injection HT MCS rate: idx=%u bw=%u sgi=%u ldpc=%u stbc=%u nss_mask=0x%x",
-					  mcs_idx, bw, sgi ? 1 : 0, ldpc ? 1 : 0,
-					  stbc, mgmt_params.tx_param.nss_mask);
-			}
-
-			/*
-			 * SGI and STBC have no per-frame field in tx_send_params.
-			 * Apply them as vdev params on the helper vdev so the
-			 * firmware rate-code engine can honor them.
-			 */
-			if (g_inj_tx_vdev.created) {
-				if (sgi)
-					wma_vdev_set_param(wma_handle->wmi_handle,
-							   g_inj_tx_vdev.vdev_id,
-							   WMI_VDEV_PARAM_SGI, 1);
-				if (stbc)
-					wma_vdev_set_param(wma_handle->wmi_handle,
-							   g_inj_tx_vdev.vdev_id,
-							   WMI_VDEV_PARAM_TX_STBC,
-							   stbc);
-			}
-		} else {
-			/* Legacy rate in 100kbps units */
-			static const struct {
-				uint16_t rate_100kbps;
-				uint16_t mcs_bit;
-				uint8_t  preamble; /* 0=OFDM, 1=CCK */
-			} rate_table[] = {
-				{  10, BIT(0),  1 },  /* CCK 1 Mbps */
-				{  20, BIT(1),  1 },  /* CCK 2 Mbps */
-				{  55, BIT(2),  1 },  /* CCK 5.5 Mbps */
-				{ 110, BIT(3),  1 },  /* CCK 11 Mbps */
-				{  60, BIT(4),  0 },  /* OFDM 6 Mbps */
-				{  90, BIT(5),  0 },  /* OFDM 9 Mbps */
-				{ 120, BIT(6),  0 },  /* OFDM 12 Mbps */
-				{ 180, BIT(7),  0 },  /* OFDM 18 Mbps */
-				{ 240, BIT(8),  0 },  /* OFDM 24 Mbps */
-				{ 360, BIT(9),  0 },  /* OFDM 36 Mbps */
-				{ 480, BIT(10), 0 },  /* OFDM 48 Mbps */
-				{ 540, BIT(11), 0 },  /* OFDM 54 Mbps */
-			};
-			int i;
-			bool matched = false;
-
-			for (i = 0; i < ARRAY_SIZE(rate_table); i++) {
-				if (req->tx_rate == rate_table[i].rate_100kbps) {
-					mgmt_params.tx_param.mcs_mask =
-						rate_table[i].mcs_bit;
-					mgmt_params.tx_param.preamble_type =
-						rate_table[i].preamble ?
-						BIT(1) /* CCK */ : BIT(0) /* OFDM */;
-					mgmt_params.tx_param.nss_mask = BIT(0);
-					mgmt_params.tx_param.bw_mask = BIT(2); /* 20MHz */
-					mgmt_params.tx_params_valid = true;
-					matched = true;
-					break;
-				}
-			}
-
-			if (!matched) {
-				/* Unknown rate — use 6 Mbps OFDM as safe default */
-				mgmt_params.use_6mbps = 1;
-				wma_debug("Injection: unmapped rate %u (100kbps), falling back to 6Mbps",
-					  req->tx_rate);
-			}
-		}
+		mgmt_params.tx_param.mcs_mask = req->tx_rate;
+		mgmt_params.tx_params_valid = true;
 	}
 
 	if (!inject_tx_cfg_logged) {
