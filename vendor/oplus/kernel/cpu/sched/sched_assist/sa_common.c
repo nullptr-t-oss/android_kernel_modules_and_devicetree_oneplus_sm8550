@@ -103,6 +103,7 @@
 #define STUNE_MULT_UNIT (UCLAMP_MAX_MULT_UNIT * SCHED_MAX_UCLAMP_MAX)
 /* debug print frequency limit */
 static DEFINE_PER_CPU(int, prev_ux_state);
+static DEFINE_PER_CPU(int, prev_sub_ux_state);
 static DEFINE_PER_CPU(int, prev_ux_priority);
 static DEFINE_PER_CPU(u64, prev_vruntime);
 static DEFINE_PER_CPU(u64, prev_min_vruntime);
@@ -401,19 +402,6 @@ bool task_is_runnable(struct task_struct *task)
 	return (task->on_rq && !task->on_cpu);
 }
 
-int get_ux_state(struct task_struct *task)
-{
-	struct oplus_task_struct *ots;
-
-	if (!task)
-		return 0;
-
-	ots = get_oplus_task_struct(task);
-	if (IS_ERR_OR_NULL(ots))
-		return 0;
-
-	return ots->ux_state;
-}
 
 bool is_min_cluster(int cpu)
 {
@@ -497,19 +485,65 @@ void oplus_set_ux_state_lock(struct task_struct *t, int ux_state, int inherit_ty
 
 	if (IS_ERR_OR_NULL(ots))
 		goto out;
+
+	if (!(ots->ux_state & SCHED_ASSIST_UX_MASK) && (ots->sub_ux_state & SCHED_ASSIST_UX_MASK)) {
+		/* ux_state is empty and sub_ux_state is not */
+		DEBUG_BUG_ON(3);
+	}
+
+	if ((ots->ux_state & SCHED_ASSIST_UX_MASK) && (ots->sub_ux_state & SCHED_ASSIST_UX_MASK)) {
+		/* ux_state is inherit or sub_ux_state is not*/
+		DEBUG_BUG_ON(ots->ux_state & SA_TYPE_INHERIT);
+		DEBUG_BUG_ON(!(ots->sub_ux_state & SA_TYPE_INHERIT));
+	}
+
+	if (inherit_type == -1) {
+		DEBUG_BUG_ON(ux_state & SA_TYPE_INHERIT);
+		if (ux_state & SCHED_ASSIST_UX_MASK) {
+			if (ots->ux_state & SA_TYPE_INHERIT) {
+				ots->sub_ux_state = ots->ux_state;
+			}
+		} else {
+			if (ots->ux_state & SA_TYPE_INHERIT) {
+				goto out;
+			} else if (ots->sub_ux_state & SCHED_ASSIST_UX_MASK) {
+				ux_state = ots->sub_ux_state;
+				ots->sub_ux_state = 0;
+			}
+		}
+	} else {
+		if (ux_state & SCHED_ASSIST_UX_MASK) {
+			DEBUG_BUG_ON(!(ux_state & SA_TYPE_INHERIT));
+		}
+		if (ux_state & SCHED_ASSIST_UX_MASK) {
+			if ((ots->ux_state & SCHED_ASSIST_UX_MASK) && !(ots->ux_state & SA_TYPE_INHERIT)) {
+				ots->sub_ux_state = ux_state;
+				goto out;
+			}
+		} else {
+			if (!(ots->ux_state & SA_TYPE_INHERIT)) {
+				if (ots->sub_ux_state & SCHED_ASSIST_UX_MASK) {
+					ots->sub_ux_state = ux_state;
+				}
+				goto out;
+			}
+		}
+	}
+
 	if (ux_state == ots->ux_state)
 		goto out;
-	/* just save ux state, if is rt or ux list if not ready */
-	if (!test_task_is_fair(t) || unlikely(!global_sched_assist_enabled)) {
+	/* just save ux state, if it is rt */
+	if (unlikely(!test_task_is_fair(t))) {
 		/* rt task set ux_state as well */
 		ots->ux_state = ux_state;
 		ots->ux_priority = ux_state_to_priority(ux_state);
-		ots->ux_nice = ux_state_to_nice(ux_state);
+		ots->ux_nice = ux_type_to_nice(ux_state);
 		goto out;
 	}
 
 	if (inherit_type == INHERIT_UX_PIFUTEX)
 		goto set;
+
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_PIPELINE)
 	if (oplus_pipeline_task_skip_ux_change(ots, &ux_state))
 		goto out;
@@ -550,21 +584,36 @@ set:
 	smp_mb__after_spinlock();
 	ots->ux_state = ux_state;
 
-	if (!(ux_state & SCHED_ASSIST_UX_MASK)) {
-		if (unlikely(task_current(rq, t))) {
-			/* if current's ux turn to off, it is likely to resched for this rq */
-			resched_curr(rq);
-		}
+	/* if ux is disabled, task only removed from list, not insert to list. */
+	if (unlikely(!global_sched_assist_enabled)) {
 		if (!oplus_rbnode_empty(&ots->ux_entry)) {
+			update_ux_timeline_task_removal(orq, ots, &t->se, task_current(rq, t));
+			put_task_struct(t);
+		}
+		ots->ux_priority = ux_state_to_priority(ux_state);
+		ots->ux_nice = ux_type_to_nice(ux_state);
+		spin_unlock_irqrestore(orq->ux_list_lock, irqflag);
+		goto out;
+	}
+
+	if (!(ux_state & SCHED_ASSIST_UX_MASK)) {
+		if (!oplus_rbnode_empty(&ots->ux_entry)) {
+			bool is_curr;
 			lockdep_assert_rq_held(rq);
-			update_ux_timeline_task_removal(orq, ots);
+			is_curr = task_current(rq, t);
+			update_ux_timeline_task_removal(orq, ots, &t->se, is_curr);
+			if (is_curr) {
+				/* if current's ux turn to off, it is likely to resched for this rq */
+				resched_curr(rq);
+			}
 			put_task_struct(t);
 			/* make sure task is removed from the list before ux_priority set to invalid */
-			smp_wmb();
+			/* smp_wmb(); */
 		}
 		ots->ux_priority = -1;
 		ots->ux_nice = -1;
 	} else if (task_on_rq_queued(t)) {
+		int prio, nice;
 		bool unlinked, is_fair;
 		struct task_struct *curr;
 		lockdep_assert_rq_held(rq);
@@ -577,28 +626,41 @@ set:
 			/*if (!ots->total_exec) {
 				ots->sum_exec_baseline = t->se.sum_exec_runtime;
 			}*/
-
-			initial_prio_nice_and_vruntime(orq, ots, ux_state_to_priority(ux_state), ux_state_to_nice(ux_state));
+			prio = ux_state_to_priority(ux_state);
+			nice = ux_type_to_nice(ux_state);
+			initial_prio_nice_and_vruntime(orq, ots, prio, nice);
 			insert_task_to_ux_timeline(ots, orq);
 			save_task_vruntime_delta(t, ots);
 		} else {
-			update_ux_timeline_task_change(orq, ots, ux_state_to_priority(ux_state), ux_state_to_nice(ux_state));
+			int next_type;
+			pick_next_ux_exec(ots, 0, &next_type);
+			if (next_type) {
+				prio = ux_type_to_priority(ots, next_type);
+				nice = ux_type_to_nice(next_type);
+				update_ux_timeline_task_change(orq, ots, prio, nice);
+			} else {
+				/* task is already timeout for current ux_state */
+				update_ux_timeline_task_removal(orq, ots, &t->se, task_current(rq, t));
+				put_task_struct(t);
+			}
 		}
 		rcu_read_lock();
 		curr = rcu_dereference(rq->curr);
-		is_fair = (curr != NULL) && test_task_is_fair(curr);
+		is_fair = (curr == NULL) || test_task_is_fair(curr);
 		rcu_read_unlock();
-		if (is_fair && !task_current(rq, t) &&
-			(ots == ux_list_first_entry(&orq->ux_list))) {
+		if (is_fair && !task_current(rq, t) && (ots == ux_list_first_entry(&orq->ux_list))) {
 			resched_curr(rq);
 		}
 	} else {
 		ots->ux_priority = ux_state_to_priority(ux_state);
-		ots->ux_nice = ux_state_to_nice(ux_state);
+		ots->ux_nice = ux_type_to_nice(ux_state);
 	}
 	spin_unlock_irqrestore(orq->ux_list_lock, irqflag);
 
 out:
+	/* ux_state is empty and sub_ux_state is not */
+	DEBUG_BUG_ON((ots != NULL) && !(ots->ux_state & SCHED_ASSIST_UX_MASK) && (ots->sub_ux_state & SCHED_ASSIST_UX_MASK));
+
 	if (need_lock_rq && need_lock_pi) {
 		task_rq_unlock(rq, t, &flags);
 	} else if (need_lock_rq && !need_lock_pi) {
@@ -697,6 +759,14 @@ void ux_priority_systrace_c(unsigned int cpu, struct task_struct *t)
 		snprintf(buf, sizeof(buf), "C|9998|Cpu%d_preset_vtime|%llu\n", cpu, value);
 		tracing_mark_write(buf);
 		per_cpu(prev_preset_vruntime, cpu) = value;
+	}
+
+	if (per_cpu(prev_sub_ux_state, cpu) != ots->sub_ux_state) {
+		char buf[256];
+
+		snprintf(buf, sizeof(buf), "C|9998|Cpu%d_sub_ux_state|%d\n", cpu, ots->sub_ux_state);
+		tracing_mark_write(buf);
+		per_cpu(prev_sub_ux_state, cpu) = ots->sub_ux_state;
 	}
 }
 
@@ -912,26 +982,10 @@ unsigned int ux_task_exec_limit(struct task_struct *p)
 		return exec_limit;
 	}
 
-	if (ux_state & SA_TYPE_HEAVY)
-		exec_limit *= 25;
-	else if (ux_state & SA_TYPE_SWIFT)
-		exec_limit *= 2;
-	else if (ux_state & SA_TYPE_ANIMATOR)
-		exec_limit *= 12;
-	else if (ux_state & SA_TYPE_LIGHT)
-		exec_limit *= 3;
-	else if (ux_state & SA_TYPE_LISTPICK)
-		exec_limit *= 30;
-
+	exec_limit = ux_max_exec_time(ux_state);
 	return exec_limit;
 }
 EXPORT_SYMBOL_GPL(ux_task_exec_limit);
-
-/* identify ux only opt in some case, but always keep it's id_type, and wont do inherit through test_task_ux() */
-bool test_task_identify_ux(struct task_struct *task, int id_type_ux)
-{
-	return false;
-}
 
 void set_im_flag_with_bit(int im_flag, struct task_struct *task)
 {
@@ -950,10 +1004,7 @@ void set_im_flag_with_bit(int im_flag, struct task_struct *task)
 	}
 }
 
-inline bool test_list_pick_ux(struct task_struct *task)
-{
-	return false;
-}
+
 
 bool test_task_ux(struct task_struct *task)
 {
@@ -992,45 +1043,38 @@ EXPORT_SYMBOL_GPL(test_task_ux);
 
 int get_ux_state_type(struct task_struct *task)
 {
+	struct oplus_task_struct *ots;
+
 	if (!task)
 		return UX_STATE_INVALID;
 
 	if (!test_task_is_fair(task))
 		return UX_STATE_INVALID;
 
-	if (oplus_get_ux_state(task) & SA_TYPE_INHERIT)
-		return UX_STATE_INHERIT;
+	ots = get_oplus_task_struct(task);
 
-	if (oplus_get_ux_state(task) & SCHED_ASSIST_UX_MASK)
-		return UX_STATE_SCHED_ASSIST;
+	if (IS_ERR_OR_NULL(ots))
+		return UX_STATE_NONE;
+
+	if ((ots->ux_state & SCHED_ASSIST_UX_MASK) && (ots->sub_ux_state & SCHED_ASSIST_UX_MASK))
+		return UX_STATE_COMBINED;
+
+	if (ots->ux_state & SCHED_ASSIST_UX_MASK) {
+		return (ots->ux_state & SA_TYPE_INHERIT) ? UX_STATE_INHERIT : UX_STATE_STATIC;
+	}
 
 	return UX_STATE_NONE;
 }
 EXPORT_SYMBOL_GPL(get_ux_state_type);
 
-/* check if a's ux prio higher than b's prio */
-bool prio_higher(int a, int b)
+bool is_multiple_ux(struct oplus_task_struct *ots)
 {
-	int a_priority = a & SCHED_ASSIST_UX_PRIORITY_MASK;
-	int b_priority = b & SCHED_ASSIST_UX_PRIORITY_MASK;
+	unsigned int ux_state_type = ots->ux_state & SCHED_ASSIST_UX_MASK;
+	unsigned int sub_ux_state_type = ots->sub_ux_state & SCHED_ASSIST_UX_MASK;
+	unsigned int ux_type = (ux_state_type | sub_ux_state_type);
 
-	if (a_priority != b_priority)
-		return (a_priority > b_priority);
-
-	if (a & SA_TYPE_SWIFT)
-		return !(b & SA_TYPE_SWIFT);
-
-	if (a & SA_TYPE_ANIMATOR)
-		return !(b & SA_TYPE_ANIMATOR);
-
-	if (a & SA_TYPE_LIGHT)
-		return !(b & (SA_TYPE_ANIMATOR | SA_TYPE_LIGHT | SA_TYPE_SWIFT));
-
-	if (a & SA_TYPE_HEAVY)
-		return !(b & (SA_TYPE_ANIMATOR | SA_TYPE_LIGHT | SA_TYPE_HEAVY | SA_TYPE_SWIFT));
-
-	/* SA_TYPE_LISTPICK */
-	return false;
+	/* has more than 1 bit */
+	return ux_type && (ux_type & ux_type - 1);
 }
 
 /*s64 __maybe_unused account_ux_runtime(struct rq *rq, struct task_struct *curr)
@@ -1116,7 +1160,7 @@ static void enqueue_ux_thread(struct rq *rq, struct task_struct *p)
 			int ux_priority, ux_nice;
 			/* ots->sum_exec_baseline = p->se.sum_exec_runtime; */
 			ux_priority = ux_state_to_priority(ots->ux_state);
-			ux_nice = ux_state_to_nice(ots->ux_state);
+			ux_nice = ux_type_to_nice(ots->ux_state);
 			initial_prio_nice_and_vruntime(orq, ots, ux_priority, ux_nice);
 		} else {
 			update_vruntime_task_attach(orq, ots);
@@ -1145,27 +1189,34 @@ static void dequeue_ux_thread(struct rq *rq, struct task_struct *p)
 	spin_lock_irqsave(orq->ux_list_lock, irqflag);
 	smp_mb__after_spinlock();
 	if (!oplus_rbnode_empty(&ots->ux_entry)) {
-		update_ux_timeline_task_removal(orq, ots);
+		int ux_state_type;
+		update_ux_timeline_task_removal(orq, ots, NULL, false);
 
 		/* inherit ux can only keep it's ux state in MAX_INHERIT_GRAN */
-		if (get_ux_state_type(p) == UX_STATE_INHERIT &&
+		ux_state_type = get_ux_state_type(p);
+		if ((ux_state_type == UX_STATE_INHERIT || ux_state_type == UX_STATE_COMBINED) &&
 			(p->se.sum_exec_runtime - ots->inherit_ux_start > get_max_inherit_gran(p))) {
 			atomic64_set(&ots->inherit_ux, 0);
 			ots->ux_depth = 0;
-			ots->ux_state = 0;
+			if (ots->ux_state & SA_TYPE_INHERIT) {
+				ots->ux_state = 0;
+			}
+			if (ots->sub_ux_state & SA_TYPE_INHERIT) {
+				ots->sub_ux_state = 0;
+			}
 			if (unlikely(global_debug_enabled & DEBUG_FTRACE))
-				trace_printk("dequeue inherit task=%-12s pid=%d sum_exec_runtime=%llu inherit_start=%llu\n",
-					p->comm, p->pid, p->se.sum_exec_runtime, ots->inherit_ux_start);
+				trace_printk("dequeue and unset inherit ux task=%-12s pid=%d tgid=%d sum_exec_runtime=%llu inherit_start=%llu\n",
+							p->comm, p->pid, p->tgid, p->se.sum_exec_runtime, ots->inherit_ux_start);
 		}
 
-		if (ots->ux_state & SA_TYPE_ONCE) {
+		/* if (ots->ux_state & SA_TYPE_ONCE) {
 			atomic64_set(&ots->inherit_ux, 0);
 			ots->ux_depth = 0;
 			ots->ux_state = 0;
 			if (unlikely(global_debug_enabled & DEBUG_FTRACE))
-				trace_printk("dequeue once task=%-12s pid=%d inherit_start=%llu\n",
-					p->comm, p->pid, ots->inherit_ux_start);
-		}
+				trace_printk("dequeue and unset once ux task=%-12s pid=%d tgid=%d inherit_start=%llu\n",
+					p->comm, p->pid, p->tgid, ots->inherit_ux_start);
+		}*/
 		put_task_struct(p);
 	}
 
@@ -1241,9 +1292,13 @@ EXPORT_SYMBOL_GPL(test_set_inherit_ux);
 
 void set_inherit_ux(struct task_struct *task, int type, int depth, int inherit_val)
 {
+	struct oplus_task_struct *ots;
 	if (!task || type >= INHERIT_UX_MAX)
 		return;
 
+	ots = get_oplus_task_struct(task);
+	if (IS_ERR_OR_NULL(ots))
+		return;
 	/*
 	 * For PIFUTEX, &task may inherit rt prio but would lose it soon after unlock,
 	 * at this case, we should check fair_class with it's ->normal_prio but not ->prio.
@@ -1258,11 +1313,6 @@ void set_inherit_ux(struct task_struct *task, int type, int depth, int inherit_v
 set:
 	inherit_ux_inc(task, type);
 	oplus_set_ux_depth(task, depth + 1);
-
-	if (inherit_val & SA_TYPE_LISTPICK) {
-		inherit_val &= (~SA_TYPE_LISTPICK);
-		inherit_val |= SA_TYPE_HEAVY;
-	}
 
 	oplus_set_ux_state_lock(task, (inherit_val & SCHED_ASSIST_UX_MASK) | SA_TYPE_INHERIT, type, true);
 	oplus_set_inherit_ux_start(task, jiffies_to_nsecs(jiffies));
@@ -1285,7 +1335,7 @@ void reset_inherit_ux(struct task_struct *inherit_task, struct task_struct *ux_t
 	if (!test_inherit_ux(inherit_task, reset_type) || !(reset_inherit & SA_TYPE_ANIMATOR))
 		return;
 
-	ux_state = (oplus_get_ux_state(inherit_task) & ~SCHED_ASSIST_UX_MASK) | reset_inherit;
+	ux_state = (oplus_get_inherited_ux_state(inherit_task) & ~SCHED_ASSIST_UX_MASK) | reset_inherit | SA_TYPE_INHERIT;
 	oplus_set_ux_depth(inherit_task, reset_depth + 1);
 	oplus_set_ux_state_lock(inherit_task, ux_state, reset_type, true);
 	trace_inherit_ux_reset(inherit_task, reset_type, oplus_get_ux_state(inherit_task),
@@ -1338,7 +1388,7 @@ void clear_all_inherit_type(struct task_struct *p)
 
 	atomic64_set(&ots->inherit_ux, 0);
 	ots->ux_depth = 0;
-	oplus_set_ux_state_lock(p, 0, -1, true);
+	oplus_set_ux_state_lock(p, 0, INHERIT_UX_MAX, true);
 }
 
 int get_max_inherit_gran(struct task_struct *p)
@@ -1356,7 +1406,8 @@ bool im_mali(const char *comm)
 		const char *postfix = comm + 5;
 		return !strcmp(postfix, "event-hand") ||
 			!strcmp(postfix, "mem-purge") || !strcmp(postfix, "cpu-comman") ||
-			!strcmp(postfix, "compiler") || !strcmp(postfix, "cmar-backe");
+			!strcmp(postfix, "compiler") || !strcmp(postfix, "cmar-backe") ||
+			!strcmp(postfix, "utility-wo");
 	}
 	return false;
 }
@@ -1369,15 +1420,8 @@ inline bool im_mali(const char *comm) {
 void sched_assist_target_comm(struct task_struct *task, const char *buf)
 {
 	char comm[128];
-	int ux_state;
 
 	strlcpy(comm, buf, sizeof(comm));
-
-	/* Set UX state for pending_submiss thread */
-	if (unlikely(!strncmp(comm, "pending_submiss", 15))) {
-		ux_state = oplus_get_ux_state(task);
-		oplus_set_ux_state_lock(task, (ux_state | SA_TYPE_HEAVY), -1, true);
-	}
 
 #ifdef CONFIG_LOCKING_PROTECT
 	if (locking_protect_disable == false) {
@@ -1395,24 +1439,6 @@ void sched_assist_target_comm(struct task_struct *task, const char *buf)
 	}
 #endif
 
-	/*set audio task ux in bilibili*/
-	if (task->group_leader &&
-		unlikely(strcmp(task->group_leader->comm, "tv.danmaku.bili"))) {
-		if (!strncmp(comm, "ff_audio_dec", 12)) {
-			ux_state = oplus_get_ux_state(task);
-			oplus_set_ux_state_lock(task, (ux_state | SA_TYPE_LIGHT), -1, true);
-		}
-	}
-
-	if (!strncmp(buf, "HwBinder", 8))
-		oplus_set_im_flag(task, IM_FLAG_HWBINDER);
-
-	/* set audio task ux in com.autonavi.minimap */
-	if (!strncmp(comm, "AudioOutputDevi", 15) && task->group_leader &&
-		strstr(task->group_leader->comm, "vilege_process0")) {
-		ux_state = oplus_get_ux_state(task);
-		oplus_set_ux_state_lock(task, (ux_state | SA_TYPE_LIGHT), -1, true);
-	}
 #ifdef CONFIG_OPLUS_CAMERA_UX
 	if (CAMERA_UID == task_uid(task).val) {
 		if (!strncmp(comm, CAMERA_PROVIDER_NAME, 15)) {

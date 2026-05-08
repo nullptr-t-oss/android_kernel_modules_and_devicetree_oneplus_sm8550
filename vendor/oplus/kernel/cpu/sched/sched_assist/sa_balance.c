@@ -111,7 +111,7 @@ void migr_running_task_systrace(
 		if (IS_ERR_OR_NULL(ots))
 			return;
 
-		ux_state = ots->ux_state & (SCHED_ASSIST_UX_MASK | SA_TYPE_INHERIT);
+		ux_state = get_ots_ux_state(ots);
 		if (!ux_state)
 			return;
 
@@ -145,7 +145,7 @@ void migr_runnable_task_systrace(
 		if (IS_ERR_OR_NULL(ots))
 			return;
 
-		ux_state = ots->ux_state & (SCHED_ASSIST_UX_MASK | SA_TYPE_INHERIT);
+		ux_state = get_ots_ux_state(ots);
 		if (!ux_state)
 			return;
 
@@ -167,7 +167,7 @@ __maybe_unused void runnable_time_systrace(
 		if (IS_ERR_OR_NULL(ots))
 			return;
 
-		ux_state = ots->ux_state & (SCHED_ASSIST_UX_MASK | SA_TYPE_INHERIT);
+		ux_state = get_ots_ux_state(ots);
 		if (!ux_state)
 			return;
 
@@ -189,7 +189,7 @@ __maybe_unused void record_runnable_time_systrace(
 		if (IS_ERR_OR_NULL(ots))
 			return;
 
-		ux_state = ots->ux_state & (SCHED_ASSIST_UX_MASK | SA_TYPE_INHERIT);
+		ux_state = get_ots_ux_state(ots);
 		if (!ux_state)
 			return;
 
@@ -211,7 +211,7 @@ __maybe_unused void record_exec_time_systrace(
 		if (IS_ERR_OR_NULL(ots))
 			return;
 
-		ux_state = ots->ux_state & (SCHED_ASSIST_UX_MASK | SA_TYPE_INHERIT);
+		ux_state = get_ots_ux_state(ots);
 		if (!ux_state)
 			return;
 
@@ -248,7 +248,7 @@ void newidle_migr_ux_systrace(
 		if (IS_ERR_OR_NULL(ots))
 			return;
 
-		ux_state = ots->ux_state & (SCHED_ASSIST_UX_MASK | SA_TYPE_INHERIT);
+		ux_state = get_ots_ux_state(ots);
 		if (!ux_state)
 			return;
 
@@ -818,7 +818,7 @@ bool test_task_ux_lb(struct task_struct *task)
 	 * Only the following 3 types of ux threads need to
 	 * be balanced.
 	 */
-	if (get_ux_state(task) & SCHED_ASSIST_LB_UX)
+	if (oplus_get_ux_state(task) & SCHED_ASSIST_LB_UX)
 		return true;
 
 	return false;
@@ -1363,7 +1363,7 @@ int find_cpu_in_migration(struct task_struct *p,
 #ifdef DEBUG_LB_TICK
 			trace_printk("OPLUS_LB_TICK[%d]: cpu=%d, curr=%s$%d$%d, "
 				"oah=%d-%d-%d, has_ux=%d, has_rt=%d\n",
-				__LINE__, cpu, curr->comm, curr->pid, get_ux_state(curr),
+				__LINE__, cpu, curr->comm, curr->pid, oplus_get_ux_state(curr),
 				cpu_online(cpu), cpu_active(cpu), oplus_cpu_halted(cpu),
 				orq_has_ux_tasks(orq), rt_rq_is_runnable(&rq->rt));
 #endif
@@ -1387,7 +1387,7 @@ int find_cpu_in_migration(struct task_struct *p,
 			/*
 			 * Ignore those CPUs if there is a ux/rt task running on it.
 			 */
-			if (get_ux_state(curr) & POSSIBLE_UX_MASK)
+			if (oplus_get_ux_state(curr) & POSSIBLE_UX_MASK)
 				continue;
 
 			if (curr->prio < MAX_RT_PRIO)
@@ -1939,7 +1939,7 @@ u64 oplus_get_runnable_time(int cpu, struct task_struct *p)
 	if (IS_ERR_OR_NULL(ots))
 		return 0;
 
-	if (!(ots->ux_state & SCHED_ASSIST_LB_UX))
+	if (!(get_ots_ux_state(ots) & SCHED_ASSIST_LB_UX))
 		return 0;
 
 	return get_runnable_time(p);
@@ -1976,7 +1976,7 @@ static struct task_struct *oplus_pick_runnable_ux(
 			continue;
 
 		/* this ux type does not require balance. */
-		if (!(ots->ux_state & SCHED_ASSIST_LB_UX))
+		if (!(get_ots_ux_state(ots) & SCHED_ASSIST_LB_UX))
 			continue;
 
 		/* affinify */
@@ -1997,7 +1997,7 @@ static struct task_struct *oplus_pick_runnable_ux(
 		trace_printk("OPLUS_LB_TICK[%d]: task=%s$%d, ux_state=%d, "
 			"on_cpu=%d, on_rq=%d, "
 			"runnable_time=%llu, threshold_time=%llu, true=%d\n",
-			__LINE__, task->comm, task->pid, ots->ux_state,
+			__LINE__, task->comm, task->pid, get_ots_ux_state(ots),
 			task->on_cpu, task->on_rq,
 			runnable_time, threshold_time, runnable_time >= threshold_time);
 #endif
@@ -2359,7 +2359,7 @@ static noinline bool oplus_tickpull_runnable_rt(void *data,
 	if (test_task_is_rt(curr))
 		return false;
 
-	if (get_ux_state(curr) & POSSIBLE_UX_MASK)
+	if (oplus_get_ux_state(curr) & POSSIBLE_UX_MASK)
 		return false;
 
 	/*
@@ -2516,7 +2516,7 @@ static noinline bool oplus_tickpull_running_ux(void *data, struct rq *rq)
 	if (test_task_is_rt(curr))
 		return false;
 
-	if (get_ux_state(curr) & POSSIBLE_UX_MASK)
+	if (oplus_get_ux_state(curr) & POSSIBLE_UX_MASK)
 		return false;
 
 	/*
@@ -2660,7 +2660,7 @@ static noinline bool oplus_tickpull_runnable_ux(void *data, struct rq *rq)
 	if (test_task_is_rt(curr))
 		return false;
 
-	if (get_ux_state(curr) & POSSIBLE_UX_MASK)
+	if (oplus_get_ux_state(curr) & POSSIBLE_UX_MASK)
 		return false;
 
 	/*

@@ -216,6 +216,7 @@ typedef enum {
 	MODE_LEATHER_COVER,
 	MODE_AOD,
 	MODE_UNDERWATER,
+	MODE_RAINSTORM,
 } work_mode;
 
 typedef enum {
@@ -1031,6 +1032,8 @@ struct touchpanel_data {
 	u8 aiunit_game_set_num;
 	int aiunit_game_enable;
 	u32 aiunit_game_valid_bits;
+	bool rainstorm_mode_v2_support;                     /*rainstorm_mode support feature*/
+	int rainstorm_enable;                               /*control state of rainstorm mode*/
 	/******For FW update area********/
 	bool lpwg_fw_support;                               /*feature to support low power wakeup gesture firmware and effect firmware are separated.*/
 	bool loading_fw;                                    /*touchpanel FW updating*/

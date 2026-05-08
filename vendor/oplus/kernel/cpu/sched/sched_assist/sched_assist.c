@@ -41,6 +41,7 @@ static void set_ux_to_task(struct task_struct *new) {
 	unsigned long newsp;
 	unsigned long fn_addr;
 	void __user *user_sp_ptr;
+	int ux_state;
 
 	if (is_compat_thread(task_thread_info(new)))
 		newsp = childregs->compat_sp;
@@ -57,7 +58,16 @@ static void set_ux_to_task(struct task_struct *new) {
 	if ((fn_addr & HI_MASK) != HI_FLAG)
 		return;
 
-	oplus_set_ux_state_lock(new, oplus_get_ux_state(current->group_leader), -1, true);
+	ux_state = oplus_get_static_ux_state(current->group_leader);
+	if (ux_state) {
+		oplus_set_ux_state_lock(new, ux_state, -1, true);
+		return;
+	}
+
+	ux_state = oplus_get_inherited_ux_state(current->group_leader);
+	if (ux_state) {
+		oplus_set_ux_state_lock(new, ux_state, INHERIT_UX_MAX, true);
+	}
 }
 
 static void android_rvh_wake_up_new_task_handler(void *unused, struct task_struct *new) {

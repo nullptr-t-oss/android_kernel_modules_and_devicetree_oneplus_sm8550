@@ -135,20 +135,20 @@ inline int get_task_cls_for_scene(struct task_struct *task)
 		}
 
 		/* for launch scene, heavy ux task should not move to min capacity cluster */
-		if (sched_assist_scene(SA_LAUNCH) && test_sched_assist_ux_type(task, SA_TYPE_HEAVY | SA_TYPE_ANIMATOR)
+		if (sched_assist_scene(SA_LAUNCH) && test_ux_type(task, SA_TYPE_HEAVY | SA_TYPE_ANIMATOR)
 			&& is_heavy_load_ux_task(task))
-			return test_sched_assist_ux_type(task, SA_TYPE_ANIMATOR) ? cls_mid : cls_max;
+			return test_ux_type(task, SA_TYPE_ANIMATOR) ? cls_mid : cls_max;
 
 		/* TOP APP's UI&Renderthread boost to big CPU */
-		if (test_sched_assist_ux_type(task, SA_TYPE_HEAVY) && is_heavy_load_top_task(task))
+		if (test_ux_type(task, SA_TYPE_HEAVY) && is_heavy_load_top_task(task))
 			return cls_mid;
 	}
 
 	/* for launch scene, heavy ux task should not move to min capacity cluster */
-	if (sched_assist_scene(SA_LAUNCH) && test_sched_assist_ux_type(task, SA_TYPE_HEAVY | SA_TYPE_ANIMATOR))
-		return test_sched_assist_ux_type(task, SA_TYPE_ANIMATOR) ? cls_mid : cls_max;
+	if (sched_assist_scene(SA_LAUNCH) && test_ux_type(task, SA_TYPE_HEAVY | SA_TYPE_ANIMATOR))
+		return test_ux_type(task, SA_TYPE_ANIMATOR) ? cls_mid : cls_max;
 
-	if (sched_assist_scene(SA_ANIM) && test_sched_assist_ux_type(task, SA_TYPE_ANIMATOR))
+	if (sched_assist_scene(SA_ANIM) && test_ux_type(task, SA_TYPE_ANIMATOR))
 		return is_task_util_over(task, BOOST_THRESHOLD_UNIT) ? cls_mid : 0;
 
 	if (sched_assist_scene(SA_LAUNCHER_SI))
@@ -232,7 +232,7 @@ static inline bool is_ux_task_prefer_cpu_for_scene(struct task_struct *task, uns
 static inline bool skip_rt_and_ux(struct task_struct *p)
 {
 	return !(sched_assist_scene(SA_LAUNCH) && p->pid == p->tgid
-		&& !test_sched_assist_ux_type(p, SA_TYPE_URGENT_MASK));
+		&& !test_ux_type(p, SA_TYPE_URGENT_MASK));
 }
 
 bool should_ux_task_skip_cpu(struct task_struct *task, unsigned int dst_cpu)
@@ -898,14 +898,14 @@ void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, struct 
 			continue;
 
 		if (unlikely(task_cpu(temp) != rq->cpu)) {
-			update_ux_timeline_task_removal(orq, ots);
+			update_ux_timeline_task_removal(orq, ots, NULL, false);
 			put_task_struct(temp);
 			DEBUG_BUG_ON(1);
 			continue;
 		}
 
 		if (unlikely(!test_task_ux(temp))) {
-			update_ux_timeline_task_removal(orq, ots);
+			update_ux_timeline_task_removal(orq, ots, NULL, false);
 			put_task_struct(temp);
 
 			/*
@@ -921,14 +921,14 @@ void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, struct 
 		}
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_AUDIO_OPT)
 		if (is_audio_scene() && test_bit(IM_FLAG_AUDIO_CAMERA_HAL, &ots->im_flag)) {
-			update_ux_timeline_task_removal(orq, ots);
+			update_ux_timeline_task_removal(orq, ots, NULL, false);
 			put_task_struct(temp);
 			continue;
 		}
 #endif
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SKIP_CAMERA_UX)
 		if (global_sched_disable_camera_ux && test_bit(IM_FLAG_CAMERAHAL_THREAD, &ots->im_flag)) {
-			update_ux_timeline_task_removal(orq, ots);
+			update_ux_timeline_task_removal(orq, ots, NULL, false);
 			put_task_struct(temp);
 			continue;
 		}

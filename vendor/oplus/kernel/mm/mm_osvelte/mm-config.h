@@ -11,11 +11,15 @@ enum config_oplus_mm_feature_disable1 {
 	COMFD1_EZRECLAIMD = 0,
 	COMFD1_KCOMPRESSED = 1,
 	COMFD1_MGLRU_OPT = 2,
+	COMFD1_QPACE = 3,
+	COMFD1_DISABLE_TCACHE_OFF = 4,
 };
 
 static const char *module_name_uxmem_opt = "oplus_bsp_uxmem_opt";
 struct config_oplus_bsp_uxmem_opt {
 	bool enable;
+	unsigned int page_pool_order0_mb;
+	unsigned int page_pool_order1_mb;
 };
 
 static const char *module_name_boost_pool = "oplus_boost_pool";
@@ -41,6 +45,14 @@ struct config_kcompressed {
 static const char *module_name_mglru_opt = "oplus_bsp_mglru_opt";
 struct config_oplus_bsp_mglru_opt {
 	bool enable;
+};
+
+/******************************************************************************
+ *                          allocator
+ ******************************************************************************/
+static const char *module_name_allocator = "allocator";
+struct config_mm_allocator {
+	bool tcache_disable;
 };
 
 extern int mm_config_init(struct proc_dir_entry *root);

@@ -151,4 +151,5 @@ int oplus_chglib_get_cc_detect(struct device *dev);
 int oplus_chglib_upload_fcl_info(struct device *dev, int batt_volt, int batt_curr, int batt_temp);
 bool oplus_chglib_check_dchg(struct device *dev, int adapter_type);
 int oplus_chglib_fcl_vbatt(struct device *dev);
+void oplus_chglib_set_ovp_forced(bool enable);
 #endif /*__OPLUS_CHGLIB_H__*/

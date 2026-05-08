@@ -901,6 +901,7 @@ struct dsi_display_mode_priv_info {
 	unsigned char oplus_adfr_min_fps_mapping_table_count;
 	unsigned int oplus_adfr_fakeframe_config;
 	unsigned int oplus_adfr_idle_off_min_fps;
+	unsigned int rd_irq_interval;
 #endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 #ifdef OPLUS_FEATURE_DISPLAY_HIGH_PRECISION
 	unsigned int *oplus_adfr_high_precision_fps_mapping_table;

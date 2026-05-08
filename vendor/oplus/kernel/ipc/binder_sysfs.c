@@ -9,6 +9,7 @@
 #include <linux/uaccess.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/compat.h>
 
 #include "binder_sched.h"
 #include "binder_sysfs.h"
@@ -94,6 +95,7 @@ static ssize_t proc_set_last_async_ux_read(struct file *file, char __user *buf,
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }
 
+
 static ssize_t proc_set_async_ux_after_pending_write(struct file *file, const char __user *buf,
 		size_t count, loff_t *ppos)
 {
@@ -119,6 +121,31 @@ static ssize_t proc_set_async_ux_after_pending_read(struct file *file, char __us
 	len = snprintf(buffer, sizeof(buffer), "%d\n", g_set_async_ux_after_pending);
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }
+static long proc_async_ux_flag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	void __user *uarg = (void __user *)arg;
+	int pid;
+	int ux_flag;
+
+	if (cmd == CMD_SET_ASYNC_BINDER_UX) {
+		int write_param[2];
+		if (copy_from_user(write_param, uarg, sizeof(write_param))) {
+			return -EFAULT;
+		}
+		pid = write_param[0];
+		ux_flag = write_param[1];
+		set_task_async_ux_enable(pid, ux_flag);
+		return 0;
+	}
+	return -ENOTTY;
+}
+
+#ifdef CONFIG_COMPAT
+static long proc_async_ux_flag_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	return proc_async_ux_flag_ioctl(file, cmd, (unsigned long)(compat_ptr(arg)));
+}
+#endif
 static ssize_t proc_async_ux_flag_write(struct file *file, const char __user *buf,
 		size_t count, loff_t *ppos)
 {
@@ -358,7 +385,11 @@ static const struct proc_ops proc_binder_async_ux_flag_fops = {
 	.proc_write		= proc_async_ux_flag_write,
 	.proc_read		= proc_async_ux_flag_read,
 	.proc_lseek		= default_llseek,
+	.proc_ioctl		= proc_async_ux_flag_ioctl,
+#ifdef CONFIG_COMPAT
+	.proc_compat_ioctl	= proc_async_ux_flag_compat_ioctl,
 };
+#endif
 
 static const struct proc_ops proc_binder_all_tasks_ux_sts_fops = {
 	.proc_write		= NULL,

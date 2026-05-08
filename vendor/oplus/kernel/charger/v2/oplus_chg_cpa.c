@@ -285,7 +285,7 @@ static int oplus_cpa_protocol_wait(struct oplus_cpa *cpa, enum oplus_chg_protoco
 				chg_debug("timeout waiting for pd_ack\n");
 				rc = -ETIMEDOUT;
 			} else {
-				chg_info("exit pd wait. left time = %lu\n", left);
+				chg_info("exit pd wait. left time = %u\n", jiffies_to_msecs(left));
 			}
 		}
 	}

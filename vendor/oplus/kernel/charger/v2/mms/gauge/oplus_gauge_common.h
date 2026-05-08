@@ -51,6 +51,17 @@ struct fcl_curves {
 #define GAUGE_TERM_VOLT_TEST_MAX_COUNT 20000
 #define GAUGE_NVRAM_TEST_DEFAULT_INTERVAL_MS   2000
 
+enum compensate_curr_temp_region {
+	CURR_TEMP_REGION_T0 = 0,
+	CURR_TEMP_REGION_T1,
+	CURR_TEMP_REGION_T2,
+	CURR_TEMP_REGION_T3,
+	CURR_TEMP_REGION_T4,
+	CURR_TEMP_REGION_T5,
+	CURR_TEMP_REGION_T6,
+	CURR_TEMP_REGION_MAX,
+};
+
 struct oplus_mms_gauge {
 	struct device *dev;
 	struct oplus_chg_ic_dev *gauge_ic;
@@ -97,6 +108,7 @@ struct oplus_mms_gauge {
 
 	struct delayed_work sili_spare_power_effect_check_work;
 	struct delayed_work sili_term_volt_effect_check_work;
+	struct delayed_work set_deep_term_volt_work;
 	struct delayed_work subboard_ntc_err_work;
 	struct delayed_work deep_dischg_work;
 	struct delayed_work sub_deep_dischg_work;
@@ -166,6 +178,13 @@ struct oplus_mms_gauge {
 	struct fcl_curves fcl;
 	int fcl_offset;
 	struct oplus_gauge_nvram_stress_test nvram_test;
+	int oplus_mainbat_compensate_num;
+	int32_t oplus_mainbat_cur_thr[CURR_TEMP_REGION_MAX];
+	int32_t oplus_mainbat_temp_thr[CURR_TEMP_REGION_MAX];
+	int mainbat_no_compensate_temp;
+#ifdef CONFIG_THERMAL
+	struct thermal_zone_device *main_batt_temp_tzd;
+#endif
 };
 
 #endif /* __OPLUS_GAUGE_COMMON_H__ */

@@ -244,7 +244,7 @@ bool test_task_overload(struct task_struct *task)
 		ots->abnormal_flag++;
 	if (ots->abnormal_flag == ABNORMAL_THRESHOLD) {
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
-		ux_stat = get_ux_state_type(task);
+		ux_stat = oplus_get_ux_state(task);
 #endif
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
 		fbg_stat = is_fbg_task(task);
@@ -252,7 +252,7 @@ bool test_task_overload(struct task_struct *task)
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
 		if (sysctl_abnormal_enable && test_task_uid(task) && !fbg_stat
-				&& ux_stat != UX_STATE_INHERIT && ux_stat != UX_STATE_SCHED_ASSIST)
+				&& !ux_stat)
 #else
 		if (sysctl_abnormal_enable && test_task_uid(task) && !fbg_stat)
 #endif

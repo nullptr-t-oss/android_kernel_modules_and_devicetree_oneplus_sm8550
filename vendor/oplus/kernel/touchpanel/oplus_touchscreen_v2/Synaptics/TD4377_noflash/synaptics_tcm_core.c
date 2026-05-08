@@ -3030,6 +3030,29 @@ static int syna_tcm_before_switch_to_gesture_mode(struct syna_tcm_hcd *tcm_hcd, 
 	return 0;
 }
 
+static int syna_tcm_before_switch_to_aod_gesture_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
+{
+	if (enable) {
+		/*set gesture fw mode flag = 1*/
+		tcm_hcd->request_fw_image_id = 1;
+		/*sw reset*/
+		syna_tcm_sw_reset(tcm_hcd);
+
+		msleep(50);
+		/*wait hostdownload done*/
+		tp_wait_hdl_finished();
+
+		tcm_hcd->request_fw_image_id = 0;
+	} else {
+		syna_tcm_sw_reset(tcm_hcd);
+
+		msleep(50);
+		/*wait hostdownload done*/
+		tp_wait_hdl_finished();
+	}
+
+	return 0;
+}
 
 static int syna_tcm_set_gesture_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 {
@@ -3107,7 +3130,7 @@ static int syna_tcm_set_aod_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 
 	if (ts->lpwg_fw_support) {
 		/*request lpwg firmware*/
-		syna_tcm_before_switch_to_gesture_mode(tcm_hcd, enable);
+		syna_tcm_before_switch_to_aod_gesture_mode(tcm_hcd, enable);
 	}
 
 	retval = syna_tcm_get_dynamic_config(tcm_hcd, DC_IN_WAKEUP_GESTURE_MODE, &config);

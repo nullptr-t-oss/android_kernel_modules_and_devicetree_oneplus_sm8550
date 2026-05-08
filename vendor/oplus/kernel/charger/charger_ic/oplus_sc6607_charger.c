@@ -4309,7 +4309,8 @@ static int oplus_sc6607_get_charger_subtype(void)
 	if (oplus_sc6607_get_pd_type() == PD_PPS_ACTIVE)
 		return CHARGER_SUBTYPE_PPS;
 	else if (oplus_sc6607_get_pd_type() == PD_ACTIVE) {
-		if (chg_chip->pd_svooc || oplus_sc6607_get_charger_type() == POWER_SUPPLY_TYPE_USB_PD_SDP)
+		if (chg_chip->pd_svooc || chg_chip->pd_wait_svid ||
+		    oplus_sc6607_get_charger_type() == POWER_SUPPLY_TYPE_USB_PD_SDP)
 			return CHARGER_SUBTYPE_DEFAULT;
 		else
 			return CHARGER_SUBTYPE_PD;

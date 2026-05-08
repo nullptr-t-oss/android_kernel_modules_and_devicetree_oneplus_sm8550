@@ -2150,6 +2150,18 @@ static int oplus_pd_manager_remove(struct platform_device *pdev)
 #endif
 }
 
+static void oplus_pd_manager_shutdown(struct platform_device *pdev)
+{
+	struct pd_manager_chip *chip = platform_get_drvdata(pdev);
+
+	if (!chip)
+		return;
+	if (!chip->tcpc)
+		return;
+
+	tcpm_shutdown(chip->tcpc);
+}
+
 static const struct of_device_id oplus_pd_manager_of_match[] = {
 	{ .compatible = "oplus,hal-pd-manager" },
 	{ }
@@ -2163,6 +2175,7 @@ static struct platform_driver oplus_pd_manager_driver = {
 	},
 	.probe = oplus_pd_manager_probe,
 	.remove = oplus_pd_manager_remove,
+	.shutdown   = oplus_pd_manager_shutdown,
 };
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))

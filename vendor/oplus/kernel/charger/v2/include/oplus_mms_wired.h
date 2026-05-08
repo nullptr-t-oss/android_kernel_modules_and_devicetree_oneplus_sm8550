@@ -144,6 +144,7 @@ int oplus_wired_get_byb_id_match_info(struct oplus_mms *topic);
 int oplus_wired_get_byb_status_info(struct oplus_mms *topic, char *buf);
 int oplus_wired_get_byb_vout_info(struct oplus_mms *topic, char *byb_buff);
 int oplus_wired_set_byb_vout_info(struct oplus_mms *topic, int byb_vout);
+int oplus_wired_get_vbat_pwr(void);
 bool oplus_wired_is_usb_aicl_enhance(void);
 int oplus_wired_get_lpd_info_status(struct oplus_mms *topic);
 int oplus_wired_set_lpd_config(struct oplus_mms *topic, int *config);
@@ -154,4 +155,6 @@ int oplus_wired_iterm_check(struct oplus_mms *topic, bool enable);
 bool oplus_wired_get_supplementary_power_mos(void);
 int oplus_wired_set_supplementary_power_mos(struct oplus_mms *topic, bool enable);
 int oplus_wired_set_dischg_status(bool dischg_en);
+int oplus_set_ovp_forced(bool enable);
+int oplus_set_dpdm_ovp_disable(bool disable);
 #endif /* __OPLUS_MMS_WIRED_H__ */

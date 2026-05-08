@@ -650,6 +650,14 @@ int ili_proximity_far(int mode)
 			ILI_ERR("Switch to gesture mode failed during proximity far\n");
 		}
 
+		if (ilits->differ_mode) {
+			if (ili_set_tp_data_len(DATA_FORMAT_DEBUG, false, NULL) < 0) {
+				ILI_ERR("Failed to switch debug mode\n");
+			}
+			if (ilits->wrapper(open_differ_cmd, 2, NULL, 0, ON, OFF) < 0) {
+				ILI_ERR("switch ilitek diff mode fail\n");
+			}
+		}
 		break;
 
 	default:
@@ -1479,6 +1487,7 @@ void ili_report_ap_mode(u8 *buf, int len)
 		ilits->glove_mode = buf[ilits->tp_data_len - ILI_V2080_WATER_FLAG] & 0x01;
 		ilits->water_flag = (buf[ilits->tp_data_len - ILI_V2080_WATER_FLAG] & 0x02) >> 1;
 		ilits->thr = (s16)((buf[ilits->tp_data_len - ILI_V2080_THR_H8] << 8) | buf[ilits->tp_data_len - ILI_V2080_THR_L8]);
+		ILI_DBG("glove_mode = %d, water_flag = %d, thr = %d\n", ilits->glove_mode, ilits->water_flag, ilits->thr);
 	}
 
 	if (ilits->ts->health_monitor_support) {
@@ -3269,7 +3278,15 @@ static int ilitek_mode_switch(void *chip_data, work_mode mode, int flag)
 		}
 
 		break;
+	case MODE_RAINSTORM:
+		ILI_INFO("MODE_RAINSTORM flag = %d\n", flag);
 
+		ret = ili_ic_func_ctrl("rainstorm", flag);
+		if (ret < 0) {
+			ILI_ERR("write MODE_RAINSTORM flag failed\n");
+		}
+
+		break;
 	default:
 		ILI_INFO("%s: Wrong mode.\n", __func__);
 	}

@@ -17,7 +17,7 @@
 
 LIST_HEAD(css_tg_map_list);
 
-int bg_cgrp, fg_cgrp, fgwd_cgrp, ta_cgrp;
+int bg_cgrp, lbg_cgrp, hbg_cgrp, fg_cgrp, fgwd_cgrp, ta_cgrp;
 
 static struct task_group *css_tg(struct cgroup_subsys_state *css)
 {
@@ -54,7 +54,9 @@ bool bg_task(struct task_struct *p)
 	if (-1 == cpu_cgrp_id)
 		return false;
 
-	if (bg_cgrp && cpu_cgrp_id == bg_cgrp)
+	if ((bg_cgrp && cpu_cgrp_id == bg_cgrp)
+		|| (lbg_cgrp && cpu_cgrp_id == lbg_cgrp)
+		|| (hbg_cgrp && cpu_cgrp_id == hbg_cgrp))
 		return true;
 
 	return false;
@@ -386,6 +388,10 @@ void save_oplus_sg_info(struct css_tg_map *map)
 		fgwd_cgrp = map->sg_info->id;
 	else if (same_cgrp(map->sg_info->tg_name, "background"))
 		bg_cgrp = map->sg_info->id;
+	else if (same_cgrp(map->sg_info->tg_name, "l-background"))
+		lbg_cgrp = map->sg_info->id;
+	else if (same_cgrp(map->sg_info->tg_name, "h-background"))
+		hbg_cgrp = map->sg_info->id;
 	else if (same_cgrp(map->sg_info->tg_name, "top-app"))
 		ta_cgrp = map->sg_info->id;
 }

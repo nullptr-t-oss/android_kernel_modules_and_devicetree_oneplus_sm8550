@@ -14,6 +14,42 @@
 #include "sa_ddl.h"
 #endif
 
+#define UX_NICE_0_LOAD  1024
+#define WMULT_CONST (~0U)
+#define WMULT_SHIFT 32
+
+#define UX_TYPE_NUM 5
+
+#define SA_TYPE_SWIFT_EXEC_TIME    (2 * UX_EXEC_SLICE)
+#define SA_TYPE_LIGHT_EXEC_TIME    (3 * UX_EXEC_SLICE)
+#define SA_TYPE_ANIMATOR_EXEC_TIME (12 * UX_EXEC_SLICE)
+#define SA_TYPE_HEAVY_EXEC_TIME    (25 * UX_EXEC_SLICE)
+#define SA_TYPE_LISTPICK_EXEC_TIME (30 * UX_EXEC_SLICE)
+
+/*
+  array contains {ux_type, ux_exec_time, next_effecitve_type}
+  NOTE: sa_type MUST be in ascending order of exec_time.
+*/
+static int SA_TYPE_EXEC_TIME_ASC[UX_TYPE_NUM][3] = {
+	{SA_TYPE_SWIFT, SA_TYPE_SWIFT_EXEC_TIME, (SA_TYPE_LIGHT | SA_TYPE_ANIMATOR | SA_TYPE_HEAVY | SA_TYPE_LISTPICK)},
+	{SA_TYPE_LIGHT, SA_TYPE_LIGHT_EXEC_TIME, (SA_TYPE_ANIMATOR| SA_TYPE_HEAVY | SA_TYPE_LISTPICK)},
+	{SA_TYPE_ANIMATOR, SA_TYPE_ANIMATOR_EXEC_TIME, (SA_TYPE_HEAVY | SA_TYPE_LISTPICK)},
+	{SA_TYPE_HEAVY, SA_TYPE_HEAVY_EXEC_TIME, SA_TYPE_LISTPICK},
+	{SA_TYPE_LISTPICK, SA_TYPE_LISTPICK_EXEC_TIME, 0}
+};
+
+/*
+  array contains {ux_type, ux_nice}
+  NOTE: sa_type MUST be in ascending order of nice.
+*/
+static int SA_TYPE_ORDER_BY_NICE[UX_TYPE_NUM][2] = {
+	{SA_TYPE_SWIFT, 0},
+	{SA_TYPE_ANIMATOR, 1},
+	{SA_TYPE_LIGHT, 4},
+	{SA_TYPE_HEAVY, 7},
+	{SA_TYPE_LISTPICK, 30}, /* 30 surpass priority exec gap */
+};
+
 /*
  * Nice levels are multiplicative, with a gentle 10% change for every
  * nice level changed. I.e. when a CPU-bound task goes from nice 0 to
@@ -62,7 +98,7 @@ const u32 ux_prio_to_preset_vruntime[PRIORITY_LEVEL_NUM] = {
 	14319390, 11111873, 8529276, 6472019, 4834275, 3521876, 2473233, 1637997, 966522, 428990, 0,
 };
 
-static inline u64 max_vruntime(u64 max_vruntime, u64 vruntime)
+inline u64 max_vruntime(u64 max_vruntime, u64 vruntime)
 {
 	s64 delta = (s64)(vruntime - max_vruntime);
 	if (delta > 0)
@@ -71,7 +107,7 @@ static inline u64 max_vruntime(u64 max_vruntime, u64 vruntime)
 	return max_vruntime;
 }
 
-static inline u64 min_vruntime(u64 min_vrt, u64 vruntime)
+inline u64 min_vruntime(u64 min_vrt, u64 vruntime)
 {
 	s64 delta = (s64)(vruntime - min_vrt);
 	if (delta < 0)
@@ -80,29 +116,10 @@ static inline u64 min_vruntime(u64 min_vrt, u64 vruntime)
 	return min_vrt;
 }
 
-static inline int vruntime_before(u64 a_vruntime, u64 b_vruntime)
+inline int vruntime_before(u64 a_vruntime, u64 b_vruntime)
 {
 	return (s64)(a_vruntime - b_vruntime) < 0;
 }
-
-#ifdef CONFIG_64BIT
-#define NICE_0_LOAD_SHIFT (SCHED_FIXEDPOINT_SHIFT + SCHED_FIXEDPOINT_SHIFT)
-#define scale_load(w) ((w) << SCHED_FIXEDPOINT_SHIFT)
-#define scale_load_down(w)                                 \
-	({                                                     \
-		unsigned long __w = (w);                           \
-		if (__w)                                           \
-			__w = max(2UL, __w >> SCHED_FIXEDPOINT_SHIFT); \
-		__w;                                               \
-	})
-#else
-#define NICE_0_LOAD_SHIFT (SCHED_FIXEDPOINT_SHIFT)
-#define scale_load(w) (w)
-#define scale_load_down(w) (w)
-#endif
-
-#define WMULT_CONST (~0U)
-#define WMULT_SHIFT 32
 
 static void __update_inv_weight(struct load_weight *lw)
 {
@@ -111,7 +128,9 @@ static void __update_inv_weight(struct load_weight *lw)
 	if (likely(lw->inv_weight))
 		return;
 
-	w = scale_load_down(lw->weight);
+	/* NOTE: no weight shift for ux load: w = scale_load_down(lw->weight); */
+	w = lw->weight;
+	DEBUG_BUG_ON((w < ux_prio_to_weight[0]) || (w >= (ux_prio_to_weight[0] * 1024)));
 
 	if (BITS_PER_LONG > 32 && unlikely(w >= WMULT_CONST))
 		lw->inv_weight = 1;
@@ -126,17 +145,19 @@ static void __update_inv_weight(struct load_weight *lw)
  *   OR
  * (delta_exec * (weight * lw->inv_weight)) >> WMULT_SHIFT
  *
- * Either weight := NICE_0_LOAD and lw \e ux_prio_to_wmult[], in which case
+ * Either weight := UX_NICE_0_LOAD and lw \e ux_prio_to_wmult[], in which case
  * we're guaranteed shift stays positive because inv_weight is guaranteed to
- * fit 32 bits, and NICE_0_LOAD gives another 10 bits; therefore shift >= 22.
+ * fit 32 bits, and UX_NICE_0_LOAD gives another 10 bits; therefore shift >= 22.
  *
  * Or, weight =< lw.weight (because lw.weight is the runqueue weight), thus
  * weight/lw.weight <= 1, and therefore our shift will also be positive.
  */
 static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
 {
-	u64 fact = scale_load_down(weight);
+	/* NOTE: no weight shift for ux load: u64 fact = scale_load_down(weight); */
+	u64 fact = weight;
 	int shift = WMULT_SHIFT;
+	DEBUG_BUG_ON((fact < ux_prio_to_weight[0]) || (fact > ux_prio_to_weight[PRIORITY_LEVEL_NUM - 1]));
 
 	__update_inv_weight(lw);
 
@@ -173,11 +194,25 @@ static inline u64 calc_delta_fair(u64 delta, int prio)
 	load.weight = ux_prio_to_weight[prio];
 	load.inv_weight = ux_prio_to_wmult[prio];
 
-	if (unlikely(load.weight != NICE_0_LOAD))
-		delta = __calc_delta(delta, NICE_0_LOAD, &load);
+	if (unlikely(load.weight != UX_NICE_0_LOAD))
+		delta = __calc_delta(delta, UX_NICE_0_LOAD, &load);
 
 	return delta;
 }
+
+inline u64 calc_delta_fair_se(u64 delta, struct sched_entity *se)
+{
+	/* NOTE: we comment out scale_load_down in ux itself's __calc_delta, so should call scale_load_down for normal cfs load */
+	struct load_weight load;
+	load.weight = scale_load_down(se->load.weight);
+	load.inv_weight = se->load.inv_weight;
+
+	if (unlikely(load.weight != UX_NICE_0_LOAD))
+		delta = __calc_delta(delta, UX_NICE_0_LOAD, &load);
+
+	return delta;
+}
+
 
 static u64 sched_slice(struct oplus_rq *orq, struct oplus_task_struct *ots, bool on_rq)
 {
@@ -204,8 +239,18 @@ static u64 sched_vslice(struct oplus_rq *orq, struct oplus_task_struct *ots)
 
 inline int ux_state_to_priority(int ux_state)
 {
-	int prio = (uint)(ux_state & SCHED_ASSIST_UX_PRIORITY_MASK) >> SCHED_ASSIST_UX_PRIORITY_SHIFT;
+	int prio;
+	if (!(ux_state & SCHED_ASSIST_UX_MASK)) {
+		return -1;
+	}
+	/* swift is only for audio, always gets audio's priority */
+	if ((ux_state & SA_TYPE_SWIFT) && !(ux_state & SA_TYPE_INHERIT)) {
+		prio = UX_PRIORITY_AUDIO;
+	} else {
+		prio = ux_state & SCHED_ASSIST_UX_PRIORITY_MASK;
+	}
 
+	prio = (uint)prio >> SCHED_ASSIST_UX_PRIORITY_SHIFT;
 	DEBUG_BUG_ON(prio < 0 || prio >= PRIORITY_LEVEL_NUM);
 
 	if (prio >= PRIORITY_LEVEL_NUM) {
@@ -215,26 +260,46 @@ inline int ux_state_to_priority(int ux_state)
 	return prio;
 }
 
-inline int ux_state_to_nice(int ux_state)
+inline int ux_type_to_priority(struct oplus_task_struct *ots, int ux_type)
 {
-	int nice = 0;
+	int ux_state = ots->ux_state;
+	int sub_ux_state = ots->sub_ux_state;
+	int prio = -1;
 
-	/* NOTE: could nice exec time surpass priority exec gap? */
-	if (ux_state & SA_TYPE_SWIFT) {
-		nice = 0;
-	} else if (ux_state & SA_TYPE_ANIMATOR) {
-		nice = 1;
-	} else if (ux_state & SA_TYPE_LIGHT) {
-		nice = 4;
-	} else if (ux_state & SA_TYPE_HEAVY) {
-		nice = 7;
-	} else if (ux_state & SA_TYPE_LISTPICK) {
-		/* surpass priority exec gap */
-		nice = 30;
-	} else {
-		DEBUG_BUG_ON(1);
+	/* if ux_state has this ux_type, get its priority first */
+	if (ux_state & ux_type) {
+		if ((ux_type == SA_TYPE_SWIFT) && !(ux_state & SA_TYPE_INHERIT)) {
+			prio = UX_PRIORITY_AUDIO;
+		} else {
+			prio = ux_state & SCHED_ASSIST_UX_PRIORITY_MASK;
+		}
+	} else if (sub_ux_state & ux_type) {
+		prio = sub_ux_state & SCHED_ASSIST_UX_PRIORITY_MASK;
 	}
-	return nice;
+
+	prio = (uint)prio >> SCHED_ASSIST_UX_PRIORITY_SHIFT;
+	DEBUG_BUG_ON(prio < 0 || prio >= PRIORITY_LEVEL_NUM);
+	if (prio >= PRIORITY_LEVEL_NUM) {
+		prio = PRIORITY_LEVEL_NUM - 1;
+	}
+
+	return prio;
+}
+
+int ux_type_to_nice(int type)
+{
+	int i;
+
+	if (type & SCHED_ASSIST_UX_MASK) {
+		/* the higher priority ux take effect first */
+		for (i = 0; i < UX_TYPE_NUM; i++) {
+			if (type & SA_TYPE_ORDER_BY_NICE[i][0]) {
+				return SA_TYPE_ORDER_BY_NICE[i][1];
+			}
+		}
+	}
+
+	return -1;
 }
 
 u64 prio_nice_to_vruntime(int ux_priority, int ux_nice)
@@ -254,6 +319,7 @@ void initial_prio_nice_and_vruntime(struct oplus_rq *orq, struct oplus_task_stru
 
 	ots->ux_priority = ux_prio;
 	ots->ux_nice = ux_nice;
+
 #ifdef ENABLE_PRESET_VRUNTIME
 	preset_vruntime = prio_nice_to_vruntime(ux_prio, ux_nice);
 	if (orq->nr_running > 0) {
@@ -330,15 +396,20 @@ void insert_task_to_ux_timeline(struct oplus_task_struct *ots, struct oplus_rq *
 	orq->load_weight += ux_prio_to_weight[ots->ux_priority];
 }
 
-void update_ux_timeline_task_change(struct oplus_rq *orq, struct oplus_task_struct *ots, int new_prio, int new_nice)
+bool update_ux_vruntime(struct oplus_rq *orq, struct oplus_task_struct *ots, int new_prio, int new_nice)
 {
 	int old_prio = ots->ux_priority;
 	int old_nice = ots->ux_nice;
 #ifdef ENABLE_PRESET_VRUNTIME
+	s64 preset_vrt_delta;
 	u64 old_preset_vrt;
+	u64 exec_vruntime;
 #endif
 	lockdep_assert_held(orq->ux_list_lock);
 
+	if (old_prio == new_prio && old_nice == new_nice) {
+		return false;
+	}
 	orq->load_weight = orq->load_weight - ux_prio_to_weight[old_prio] + ux_prio_to_weight[new_prio];
 	DEBUG_BUG_ON((orq->nr_running < 0) || ((s64)orq->load_weight < 0));
 	DEBUG_BUG_ON((orq->nr_running == 0) && (orq->load_weight != 0));
@@ -348,18 +419,34 @@ void update_ux_timeline_task_change(struct oplus_rq *orq, struct oplus_task_stru
 	ots->ux_priority = new_prio;
 	ots->ux_nice = new_nice;
 
-
 #ifdef ENABLE_PRESET_VRUNTIME
 	old_preset_vrt = ots->preset_vruntime;
-	ots->preset_vruntime = old_preset_vrt - prio_nice_to_vruntime(old_prio, old_nice) + prio_nice_to_vruntime(new_prio, new_nice);
-	ots->vruntime = ots->vruntime - old_preset_vrt + ots->preset_vruntime;
+	preset_vrt_delta = prio_nice_to_vruntime(new_prio, new_nice) - prio_nice_to_vruntime(old_prio, old_nice);
+	/* adjust preset vruntime for new priority and new nice */
+	ots->preset_vruntime = old_preset_vrt + preset_vrt_delta;
+	if (preset_vrt_delta > 0) {
+		/* try to keep vruntime unaltered, don't get punitive vruntime when turn to a lower prio from a higher one */
+		exec_vruntime = ots->vruntime - old_preset_vrt - preset_vrt_delta;
+		exec_vruntime = max_vruntime(orq->min_vruntime, exec_vruntime);
+		ots->vruntime = ots->preset_vruntime + exec_vruntime;
+	} else {
+		ots->vruntime += preset_vrt_delta;
+	}
 #endif
 	DEBUG_BUG_ON((s64)(ots->preset_vruntime) < 0);
 	DEBUG_BUG_ON((s64)(ots->vruntime) < 0);
+	return true;
+}
 
-	/* rebalance vruntime timeline */
-	rb_erase_cached(&ots->ux_entry, &orq->ux_list);
-	rb_add_cached(&ots->ux_entry, &orq->ux_list, __entity_less);
+void update_ux_timeline_task_change(struct oplus_rq *orq, struct oplus_task_struct *ots, int new_prio, int new_nice)
+{
+	bool updated = update_ux_vruntime(orq, ots, new_prio, new_nice);
+
+	if (updated) {
+		/* rebalance vruntime timeline */
+		rb_erase_cached(&ots->ux_entry, &orq->ux_list);
+		rb_add_cached(&ots->ux_entry, &orq->ux_list, __entity_less);
+	}
 }
 
 void update_ux_timeline_task_tick(struct oplus_rq *orq, struct oplus_task_struct *ots)
@@ -410,7 +497,8 @@ void update_ux_timeline_task_tick(struct oplus_rq *orq, struct oplus_task_struct
 	}
 }
 
-void update_ux_timeline_task_removal(struct oplus_rq *orq, struct oplus_task_struct *ots) {
+void update_ux_timeline_task_removal(struct oplus_rq *orq, struct oplus_task_struct *ots, __maybe_unused struct sched_entity *se, __maybe_unused bool is_curr)
+{
 	bool need_update_min_vrt;
 
 	lockdep_assert_held(orq->ux_list_lock);
@@ -436,10 +524,7 @@ void update_ux_timeline_task_removal(struct oplus_rq *orq, struct oplus_task_str
 		orq->min_vruntime = 0;
 		DEBUG_BUG_ON(NULL != ux_list_first_entry(&orq->ux_list));
 		DEBUG_BUG_ON(NULL != exec_timeline_first_entry(&orq->exec_timeline));
-		return;
-	}
-
-	if (need_update_min_vrt) {
+	} else if (need_update_min_vrt) {
 		/* NOTE: ots->vruntime may move backwards if the priority of task becomes higher.
 		* And its exec_vruntime (ots->vruntime - ots->preset_vruntime) keeps forewards while keeps running.
 		* When switch to next task, next task's exec_vruntime may begin at zero again.
@@ -459,7 +544,7 @@ bool need_resched_ux(struct oplus_rq *orq, struct oplus_task_struct *curr, unsig
 {
 	struct oplus_task_struct *ots;
 	s64 vdiff;
-	unsigned long ideal_runtime;
+	u64 ideal_runtime;
 
 	lockdep_assert_held(orq->ux_list_lock);
 
@@ -469,7 +554,7 @@ bool need_resched_ux(struct oplus_rq *orq, struct oplus_task_struct *curr, unsig
 	ots = ux_list_first_entry(&orq->ux_list);
 
 	DEBUG_BUG_ON(ots == NULL);
-	if ((ots == NULL) || (curr == ots)) {
+	if (curr == ots) {
 		return false;
 	}
 
@@ -484,7 +569,7 @@ bool need_resched_ux(struct oplus_rq *orq, struct oplus_task_struct *curr, unsig
 		return false;
 	}
 
-	return (vdiff > ideal_runtime);
+	return ((u64)vdiff > ideal_runtime);
 }
 
 bool need_wakeup_preempt(struct oplus_rq *orq, struct oplus_task_struct *curr)
@@ -507,12 +592,87 @@ bool need_wakeup_preempt(struct oplus_rq *orq, struct oplus_task_struct *curr)
 	return (vdiff > ux_wakeup_gran_vtime);
 }
 
-void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta, u64 vruntime)
+inline int ux_max_exec_time(int types)
+{
+	int i;
+
+	/* get the maximum exe time among in types */
+	for (i = UX_TYPE_NUM - 1; i >= 0; i--) {
+		if (types & SA_TYPE_EXEC_TIME_ASC[i][0]) {
+			return SA_TYPE_EXEC_TIME_ASC[i][1];
+		}
+	}
+	return 0;
+}
+
+inline int next_effective_ux_type(int types)
+{
+	int i;
+
+	if (types & SCHED_ASSIST_UX_MASK) {
+		/* the higher priority ux take effect first */
+		for (i = 0; i < UX_TYPE_NUM; i++) {
+			if (types & SA_TYPE_ORDER_BY_NICE[i][0]) {
+				return SA_TYPE_ORDER_BY_NICE[i][0];
+			}
+		}
+	}
+
+	return 0;
+}
+
+
+/**
+ * @brief get next available sa types for exec time
+ *
+ * @param pre_exec_time previous exec time
+ * @param exec_time current exec time
+ * @param next_types available sa types
+ * @return bool if type switched
+ */
+inline bool next_effective_ux_types(u64 pre_exec_time, u64 exec_time, int *next_types)
+{
+	int i;
+
+	for (i = UX_TYPE_NUM - 1; i >= 0; i--) {
+		if (exec_time >= SA_TYPE_EXEC_TIME_ASC[i][1]) {
+			*next_types = SA_TYPE_EXEC_TIME_ASC[i][2];
+			return (pre_exec_time < SA_TYPE_EXEC_TIME_ASC[i][1]);
+		}
+	}
+
+	*next_types = SCHED_ASSIST_UX_MASK;
+	return false;
+}
+
+bool pick_next_ux_exec(struct oplus_task_struct *ots, u64 pre_exec_time, int *next_type)
+{
+	int ux_types;
+	int ux_type;
+	int effective_types;
+
+	bool ux_type_switched = next_effective_ux_types(pre_exec_time, ots->total_exec, &ux_types);
+	/* if ux_state exist, get type from it first */
+	effective_types = ux_types & ots->ux_state;
+	ux_type = next_effective_ux_type(effective_types);
+
+	if (!ux_type) {
+		/* get sub_ux_state's ux_type socondly */
+		effective_types = ux_types & ots->sub_ux_state;
+		ux_type = next_effective_ux_type(effective_types);
+	}
+
+	*next_type = ux_type;
+	return ux_type_switched;
+}
+
+void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta_exec, u64 vruntime)
 {
 	struct rq *rq;
 	struct oplus_rq *orq;
 	struct oplus_task_struct *ots;
 	unsigned long irqflag;
+
 
 	rq = task_rq(task);
 	orq = get_oplus_rq(rq);
@@ -524,21 +684,46 @@ void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *tas
 	spin_lock_irqsave(orq->ux_list_lock, irqflag);
 	smp_mb__after_spinlock();
 	if (!oplus_rbnode_empty(&ots->ux_entry)) {
-		unsigned int limit;
+		u64 pre_exec_time;
+		int next_ux_type = 0;
+		struct sched_entity *se = &task->se;
 
-		ots->total_exec += delta;
-		ots->vruntime += calc_delta_fair(delta, ots->ux_priority);
-		limit = ux_task_exec_limit(task);
-		if (ots->total_exec >= limit) {
-			/* make up task vruntime for swift task */
-			make_up_task_vruntime(task, ots);
-			update_ux_timeline_task_removal(orq, ots);
-			put_task_struct(task);
-		} else {
-			/* rebalance ux timeline after task's vruntime changed */
-			update_ux_timeline_task_tick(orq, ots);
+		pre_exec_time = ots->total_exec;
+		ots->total_exec += delta_exec;
+		ots->vruntime += calc_delta_fair(delta_exec, ots->ux_priority);
+
+		if (is_multiple_ux(ots)) {
+			bool switched = pick_next_ux_exec(ots, pre_exec_time, &next_ux_type);
+			if (switched && next_ux_type) {
+				int ux_prio, ux_nice;
+				ux_prio = ux_type_to_priority(ots, next_ux_type);
+				ux_nice = ux_type_to_nice(next_ux_type);
+
+				/* during running, ux's priotity is monotone decreasing  */
+				DEBUG_BUG_ON(ux_prio > ots->ux_priority);
+				/* if ux_state is sa_light and sub_ux_state is sa_animator, ux nice descrease when switched */
+				DEBUG_BUG_ON((ux_nice < ots->ux_nice) && (next_ux_type != SA_TYPE_ANIMATOR));
+				update_ux_vruntime(orq, ots, ux_prio, ux_nice);
+			}
 		}
+
+		if (!next_ux_type) {
+			unsigned int limit;
+			limit = ux_task_exec_limit(task);
+			if (ots->total_exec >= limit) {
+				/* make up task vruntime for swift task */
+				make_up_task_vruntime(task, ots);
+				update_ux_timeline_task_removal(orq, ots, se, true);
+				put_task_struct(task);
+				goto out;
+			}
+		}
+
+		/* rebalance ux timeline after task's vruntime changed */
+		update_ux_timeline_task_tick(orq, ots);
 	}
+
+out:
 	spin_unlock_irqrestore(orq->ux_list_lock, irqflag);
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)

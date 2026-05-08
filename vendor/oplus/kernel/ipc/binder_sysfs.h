@@ -1,6 +1,9 @@
 #ifndef _OPLUS_BINDER_SYSFS_H_
 #define _OPLUS_BINDER_SYSFS_H_
 
+#define ASYNC_UX_MAGIC 0x7A69
+#define CMD_SET_ASYNC_BINDER_UX _IOW(ASYNC_UX_MAGIC, 0, int[2])
+
 extern unsigned int g_async_ux_enable;
 extern unsigned int g_set_last_async_ux;
 extern unsigned int g_set_async_ux_after_pending;

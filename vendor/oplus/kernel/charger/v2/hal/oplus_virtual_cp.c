@@ -30,6 +30,7 @@
 #include <oplus_chg_ic.h>
 #include <oplus_mms.h>
 #include <oplus_mms_wired.h>
+#include <oplus_mms_gauge.h>
 
 #define CP_REG_TIMEOUT_MS	120000
 #define PROC_DATA_BUF_SIZE	256
@@ -175,6 +176,7 @@ static struct oplus_cp_strategy *obc_strategy_alloc(
 	int rc;
 	int i;
 
+	node = oplus_get_node_by_child_gauge(node);
 	if (node == NULL) {
 		chg_err("device node is NULL\n");
 		return NULL;
@@ -372,7 +374,7 @@ static struct oplus_cp_strategy_desc g_strategy_desc[] = {
 
 static struct oplus_cp_strategy *oplus_vc_strategy_alloc(struct oplus_virtual_cp_ic *cp)
 {
-	struct device_node *node = cp->dev->of_node;
+	struct device_node *node = oplus_get_node_by_child_gauge(cp->dev->of_node);
 	struct device_node *strategy_node;
 	enum oplus_cp_strategy_type type;
 	struct oplus_cp_strategy_desc *desc = NULL;
@@ -502,6 +504,7 @@ static struct device_node *oplus_vc_find_ic_root_node(struct device_node *root, 
 	int rc;
 	int i;
 
+	root = oplus_get_node_by_child_gauge(root);
 	rc = of_property_count_elems_of_size(root, "oplus,cp_ic", sizeof(u32));
 	if (rc < 0) {
 		chg_err("can't get cp ic number, rc=%d\n", rc);
@@ -716,7 +719,7 @@ static void oplus_vc_child_reg_callback(struct oplus_chg_ic_dev *ic, void *data,
 
 static int oplus_vc_child_init(struct oplus_virtual_cp_ic *chip)
 {
-	struct device_node *node = chip->dev->of_node;
+	struct device_node *node = oplus_get_node_by_child_gauge(chip->dev->of_node);
 	int i = 0;
 	int rc = 0;
 	const char *name;
@@ -1265,6 +1268,7 @@ static void oplus_chg_vc_close_step(struct oplus_virtual_cp_ic *vc, struct oplus
 	if (ic_dev == NULL)
 		return;
 
+	chg_info("close cp!\n");
 	rc = oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_CP_SET_WORK_START, false);
 	if (rc < 0)
 		chg_err("can't set cp[%s] work stop, rc=%d\n", ic_dev->manu_name, rc);
@@ -1740,16 +1744,40 @@ static int oplus_chg_vc_adc_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 	}
 
 	vc = oplus_chg_ic_get_drvdata(ic_dev);
-	/* When using a policy, the CP adc is enabled by the policy */
-	if (en && vc->strategy)
-		return 0;
-
 	for (i = 0; i < vc->child_num; i++) {
 		rc = oplus_chg_ic_func(vc->child_list[i].ic_dev,
 			OPLUS_IC_FUNC_CP_SET_ADC_ENABLE, en);
 		if (rc < 0 && rc != -ENOTSUPP) {
 			chg_err("child ic[%d] %s error, rc=%d\n", i, en ? "enable" : "disable", rc);
 			err = rc;
+		} else if (rc >= 0) {
+			err = rc;
+		}
+	}
+
+	return err;
+}
+
+static int oplus_chg_vc_get_adc_enable(struct oplus_chg_ic_dev *ic_dev, bool *en)
+{
+	struct oplus_virtual_cp_ic *vc;
+	int i;
+	int rc = 0;
+	int err = -ENOTSUPP;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	vc = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < vc->child_num; i++) {
+		rc = oplus_chg_ic_func(vc->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_CP_GET_ADC_ENABLE, en);
+		if (rc < 0) {
+			if (rc != -ENOTSUPP)
+				chg_err("child ic[%d] error, rc=%d\n", i, rc);
+			continue;
 		} else if (rc >= 0) {
 			err = rc;
 		}
@@ -2089,6 +2117,9 @@ static void *oplus_chg_vc_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_c
 		break;
 	case OPLUS_IC_FUNC_CP_SET_ADC_ENABLE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_SET_ADC_ENABLE, oplus_chg_vc_adc_enable);
+		break;
+	case OPLUS_IC_FUNC_CP_GET_ADC_ENABLE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_ADC_ENABLE, oplus_chg_vc_get_adc_enable);
 		break;
 	case OPLUS_IC_FUNC_CP_GET_TEMP:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_TEMP, oplus_chg_vc_get_cp_temp);

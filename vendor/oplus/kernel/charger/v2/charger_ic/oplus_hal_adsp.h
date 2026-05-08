@@ -116,6 +116,7 @@
 #define UFCS_EXIT_MODE_NOTIFY		0X7e
 #define PD_CONNECT_HARD_RESET		0x7f
 #define GAUGE_INITED			0X90
+#define PD_PPS_CHECK_COMPLETED		0x91
 #endif
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
@@ -384,6 +385,7 @@ enum usb_property_id {
 	USB_REVERSE_CHG_SET_VOLT,
 	USB_REVERSE_CHG_SET_CURRENT,
 	USB_RVS_HIGH_MODE_EN,
+	USB_SET_WIRED_USB_STATUS,
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
 	USB_PROP_MAX,
 };
@@ -692,6 +694,8 @@ struct battery_chg_dev {
 	struct oplus_mms		*err_topic;
 	struct oplus_mms		*plc_topic;
 	struct mms_subscribe		*plc_subs;
+	struct oplus_mms		*wired_topic;
+	struct mms_subscribe		*wired_subs;
 	struct votable			*chg_disable_votable;
 	struct mutex			chg_en_lock;
 	bool 				    chg_en;
@@ -712,6 +716,7 @@ struct battery_chg_dev {
 	int				charger_type;
 	int				last_charger_type;
 	int				adsp_crash;
+	atomic_t			adsp_reboot;
 	atomic_t			state;
 	int				rerun_max;
 	int				pd_chg_volt;
@@ -759,6 +764,8 @@ struct battery_chg_dev {
 	struct delayed_work	ufcs_reset_work;
 	struct delayed_work	update_common_charge_flag_work;
 	struct delayed_work	check_abnormal_usbin_status_work;
+	struct delayed_work     crash_timeout_work;
+	struct delayed_work	update_pd_completed_work;
 	int			abnormal_usbin_count;
 	struct delayed_work	reverse_chg_svid_check_work;
 	struct delayed_work	source_pdo_check_work;
@@ -884,7 +891,9 @@ struct battery_chg_dev {
 	int batt_full_para[CHARGING_TYPE_MAX][QBG_TEMP_MAX];
 	int batt_full_temp[QBG_TEMP_MAX];
 	bool batt_full_method_new;
+	bool pd_check_completed;
 	atomic_t is_shaft_btb_over;
+	bool adsp_reboot_discnt_chg_support;
 };
 
 /**********************************************************************

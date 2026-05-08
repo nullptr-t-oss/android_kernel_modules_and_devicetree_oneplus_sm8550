@@ -243,6 +243,7 @@ int mode_switch_health(struct touchpanel_data *ts, work_mode mode, int flag)
 			   (MODE_WIRELESS_CHARGE == mode) ? "mode_wireless_charge_switch_fail" :
 			   (MODE_PEN_SCAN == mode) ? "mode_pen_scan_switch_fail" :
 			   (MODE_AOD == mode) ? "mode_aod_switch_fail" :
+			   (MODE_RAINSTORM == mode) ? "mode_rainstorm_mode_fail" :
 			   (MODE_PEN_CTL == mode) ? "mode_pen_ctl_switch_fail" : "mode_others_switch_fail");
 	}
 
@@ -372,6 +373,10 @@ void operate_mode_switch(struct touchpanel_data *ts)
 		}
 		if (ts->disable_touch_event_support) {
 			mode_switch_health(ts, MODE_UNDERWATER, ts->disable_touch_event);
+		}
+
+		if (ts->rainstorm_mode_v2_support) {
+			mode_switch_health(ts, MODE_RAINSTORM, ts->rainstorm_enable);
 		}
 		mode_switch_health(ts, MODE_NORMAL, true);
 	}
@@ -974,6 +979,10 @@ static inline void tp_touch_handle(struct touchpanel_data *ts)
 				}
 
 				input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
+				if (CHK_BIT(ts->irq_slot, (1 << i))) {
+					TP_INFO(ts->tp_index, "touch point id %d up.\n", i);
+					CLR_BIT(ts->irq_slot, (1 << i));
+				}
 			}
 		}
 
@@ -2324,6 +2333,7 @@ static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 
 	ts->tp_lcd_suspend_in_lp_support = of_property_read_bool(np, "tp_lcd_suspend_in_lp_support");
 	TP_INFO(ts->tp_index, "tp_lcd_suspend_in_lp_support is %d\n", ts->tp_lcd_suspend_in_lp_support);
+	ts->rainstorm_mode_v2_support      = of_property_read_bool(np, "rainstorm_mode_v2_support");
 
 	rc = of_property_read_u32(np, "vdd_2v8_volt", &ts->hw_res.vdd_volt);
 	if (rc < 0) {

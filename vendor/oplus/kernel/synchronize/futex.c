@@ -77,7 +77,7 @@ static int futex_set_inherit_ux_refs(struct task_struct *holder, struct task_str
 		if (unlikely(IS_ERR_OR_NULL(ots)))
 			return 0;
 
-		if (type == UX_STATE_NONE) {
+		if (type == UX_STATE_NONE || type == UX_STATE_STATIC) {
 			if (holder->__state & TASK_NORMAL)
 				atomic_long_inc((atomic_long_t*)&futex_set_blocked_ux_cnt);
 
@@ -89,7 +89,7 @@ static int futex_set_inherit_ux_refs(struct task_struct *holder, struct task_str
 				p->comm, p->pid, p->tgid);
 
 			return INHERIT_SET;
-		} else if (type == UX_STATE_INHERIT) {
+		} else if (type == UX_STATE_INHERIT || type == UX_STATE_COMBINED) {
 			if (holder->__state & TASK_NORMAL)
 				atomic_long_inc((atomic_long_t*)&futex_set_blocked_ux_cnt);
 
@@ -300,7 +300,7 @@ static inline bool curr_is_ux_thread_nolimit()
 {
 	int state = get_ux_state_type(current);
 
-	return (state == UX_STATE_INHERIT) || (state == UX_STATE_SCHED_ASSIST);
+	return (state == UX_STATE_INHERIT) || (state == UX_STATE_STATIC) || (state == UX_STATE_COMBINED);
 }
 
 static void android_vh_do_futex_handler(void *unused, int cmd,
