@@ -176,11 +176,13 @@ static void reg_update_unsafe_ch(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS reg_process_ch_avoid_event(struct wlan_objmgr_psoc *psoc,
 				      struct ch_avoid_ind_type *ch_avoid_event)
 {
-	return QDF_STATUS_SUCCESS;
-
 	uint32_t i;
 	struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj;
 	QDF_STATUS status;
+
+	#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+		return QDF_STATUS_SUCCESS;
+	#endif /* FEATURE_FRAME_INJECTION_SUPPORT */
 
 	psoc_priv_obj = reg_get_psoc_obj(psoc);
 	if (!psoc_priv_obj) {
