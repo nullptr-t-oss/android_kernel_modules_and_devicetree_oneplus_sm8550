@@ -50,6 +50,7 @@
 #endif
 
 #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+#include <linux/moduleparam.h>
 
 /*
  * wma_injection_unmap_tx_buf() - Unmap DMA mapping on injection nbuf
@@ -573,10 +574,21 @@ void wma_injection_pre_stop_cleanup(tp_wma_handle wma_handle)
  * If no helper vdev exists yet this is a no-op (it will be created lazily
  * on the first injection attempt at the new frequency).
  */
+static int allow_auto_channel_switch = 1;
+
+module_param(allow_auto_channel_switch, int, 0644);
+MODULE_PARM_DESC(allow_auto_channel_switch, "Enable/disable auto channel switch on injection (0=disabled, 1=enabled)");
+
 void wma_injection_notify_channel_change(tp_wma_handle wma_handle,
 					 uint8_t mon_vdev_id,
 					 uint32_t new_freq)
 {
+
+	if (!allow_auto_channel_switch) {
+		wma_info("Auto channel switch disabled, ignoring change to %u MHz", new_freq);
+		return;
+	}
+
 	struct wma_injection_queue_ctx *ctx = &g_wma_injection_ctx;
 	QDF_STATUS status;
 	int drain_wait_ms = 0;
