@@ -584,14 +584,14 @@ void wma_injection_notify_channel_change(tp_wma_handle wma_handle,
 					 uint32_t new_freq)
 {
 
+	struct wma_injection_queue_ctx *ctx = &g_wma_injection_ctx;
+	QDF_STATUS status;
+	int drain_wait_ms = 0;
+
 	if (!allow_auto_channel_switch) {
 		wma_info("Auto channel switch disabled, ignoring change to %u MHz", new_freq);
 		return;
 	}
-
-	struct wma_injection_queue_ctx *ctx = &g_wma_injection_ctx;
-	QDF_STATUS status;
-	int drain_wait_ms = 0;
 
 	if (!wma_handle || !new_freq)
 		return;
