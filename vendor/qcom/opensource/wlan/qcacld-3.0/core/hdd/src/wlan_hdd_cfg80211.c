@@ -105,6 +105,7 @@
 
 #include <cdp_txrx_cmn.h>
 #include <cdp_txrx_misc.h>
+#include <cdp_txrx_mon.h>
 #include <cdp_txrx_ctrl.h>
 #include "wlan_pmo_ucfg_api.h"
 #include "os_if_wifi_pos.h"
@@ -25853,8 +25854,10 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 	qdf_mem_zero(&ch_params, sizeof(struct ch_params));
 
 	req = qdf_mem_malloc(sizeof(struct channel_change_req));
-	if (!req)
+	if (!req) {
+		adapter->monitor_mode_vdev_up_in_progress = false;
 		return -ENOMEM;
+	}
 
 	req->vdev_id = adapter->vdev_id;
 	req->target_chan_freq = chandef->chan->center_freq;
@@ -25869,10 +25872,23 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 	req->center_freq_seg1 = ch_params.center_freq_seg1;
 
 	sme_fill_channel_change_request(mac_handle, req, ch_info->phy_mode);
+
+	/* Keep queued injection frames out of the old channel transition. */
+	status = wma_injection_channel_change_begin(
+			adapter->deflink->vdev_id,
+			chandef->chan->center_freq);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		hdd_warn("failed to quiesce monitor injection: %d", status);
+		qdf_mem_free(req);
+		adapter->monitor_mode_vdev_up_in_progress = false;
+		return qdf_status_to_os_return(status);
+	}
+
 	status = sme_send_channel_change_req(mac_handle, req);
 	qdf_mem_free(req);
 
 	if (status) {
+		wma_injection_channel_change_end();
 		hdd_err_rl("Failed to set sme_RoamChannel for monitor mode status: %d",
 			   status);
 		adapter->monitor_mode_vdev_up_in_progress = false;
@@ -25885,6 +25901,7 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 				       &adapter->qdf_monitor_mode_vdev_up_event,
 					WLAN_MONITOR_MODE_VDEV_UP_EVT);
 	if (QDF_IS_STATUS_ERROR(status)) {
+		wma_injection_channel_change_end();
 		hdd_err_rl("monitor vdev up event time out vdev id: %d",
 			  adapter->vdev_id);
 		if (adapter->qdf_monitor_mode_vdev_up_event.force_set)
@@ -25902,6 +25919,16 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 		adapter->monitor_mode_vdev_up_in_progress = false;
 		return qdf_status_to_os_return(status);
 	}
+
+	/* Helper vdev setup rewrites the shared RXDMA ring selection. */
+	status = cdp_refresh_monitor_mode(
+			cds_get_context(QDF_MODULE_ID_SOC), OL_TXRX_PDEV_ID,
+			adapter->deflink->vdev_id);
+	if (QDF_IS_STATUS_ERROR(status))
+		hdd_warn("failed to restore monitor RX filters: %d", status);
+	else
+		msleep(20);
+	wma_injection_channel_change_end();
 
 	hdd_exit();
 
@@ -26926,6 +26953,54 @@ bool hdd_is_legacy_connection(struct hdd_adapter *adapter)
 		return false;
 }
 
+#ifdef FEATURE_MONITOR_MODE_SUPPORT
+static int
+wlan_hdd_cfg80211_get_channel_mon(struct wiphy *wiphy,
+				  struct cfg80211_chan_def *chandef,
+				  struct hdd_adapter *adapter)
+{
+	struct hdd_monitor_ctx *mon_ctx;
+	struct wlan_objmgr_vdev *vdev;
+	struct wlan_channel chan_info = {0};
+	struct wlan_channel *des_chan;
+
+	vdev = hdd_objmgr_get_vdev_by_user(adapter->deflink, WLAN_OSIF_ID);
+	if (vdev) {
+		des_chan = wlan_vdev_mlme_get_des_chan(vdev);
+		if (des_chan && des_chan->ch_freq)
+			qdf_mem_copy(&chan_info, des_chan, sizeof(chan_info));
+		hdd_objmgr_put_vdev_by_user(vdev, WLAN_OSIF_ID);
+	}
+
+	/* The monitor context is updated by set_monitor_channel first. */
+	if (!chan_info.ch_freq) {
+		mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter->deflink);
+		chan_info.ch_freq = mon_ctx->freq;
+		chan_info.ch_cfreq1 = mon_ctx->freq;
+		chan_info.ch_width = mon_ctx->bandwidth;
+	}
+
+	if (!chan_info.ch_freq)
+		return -ENODATA;
+
+	chandef->chan = ieee80211_get_channel(wiphy, chan_info.ch_freq);
+	if (!chandef->chan)
+		return -EINVAL;
+
+	chandef->center_freq1 = chan_info.ch_cfreq1 ?: chan_info.ch_freq;
+	chandef->center_freq2 = 0;
+	wlan_hdd_update_chandef(chandef, chan_info.ch_width,
+				chan_info.ch_cfreq2, false);
+	wlan_hdd_set_chandef_for_11be(chandef, &chan_info);
+
+	hdd_debug("monitor freq:%d, ch_width:%d, c_freq1:%d, c_freq2:%d",
+		  chan_info.ch_freq, chandef->width, chandef->center_freq1,
+		  chandef->center_freq2);
+
+	return 0;
+}
+#endif
+
 static int __wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
 					   struct wireless_dev *wdev,
 					   struct cfg80211_chan_def *chandef,
@@ -26982,6 +27057,10 @@ static int __wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
 			is_legacy_phymode = true;
 			break;
 		}
+#ifdef FEATURE_MONITOR_MODE_SUPPORT
+	} else if (adapter->device_mode == QDF_MONITOR_MODE) {
+		return wlan_hdd_cfg80211_get_channel_mon(wiphy, chandef, adapter);
+#endif
 	} else {
 		return -EINVAL;
 	}

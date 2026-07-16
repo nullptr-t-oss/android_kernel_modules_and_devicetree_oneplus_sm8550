@@ -1920,6 +1920,10 @@ enum wlan_state_ctrl_str_id {
  * @file_name:
  * @dbam_mode:
  * @bridgeaddr: Bridge MAC address
+ * @monitor_restore_work: work that reopens a station preserved for monitor use
+ * @monitor_restore_work_status: initialization state of monitor restore work
+ * @monitor_restore_iface: name of the preserved station interface
+ * @monitor_restore_pending: whether a preserved station needs reopening
  */
 struct hdd_context {
 	struct wlan_objmgr_psoc *psoc;
@@ -2203,6 +2207,12 @@ struct hdd_context {
 	enum coex_dbam_config_mode dbam_mode;
 #endif
 	uint8_t bridgeaddr[QDF_MAC_ADDR_SIZE];
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	qdf_work_t monitor_restore_work;
+	enum hdd_work_status monitor_restore_work_status;
+	char monitor_restore_iface[IFNAMSIZ];
+	bool monitor_restore_pending;
+#endif
 };
 
 /**

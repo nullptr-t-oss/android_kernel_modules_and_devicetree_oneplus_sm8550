@@ -875,6 +875,8 @@ ol_txrx_pdev_attach(ol_txrx_soc_handle soc,
 		goto fail0;
 	}
 
+	pdev->is_mgmt_over_wmi_enabled = 0;
+
 	/* init LL/HL cfg here */
 	pdev->cfg.is_high_latency = ol_cfg_is_high_latency(cfg_pdev);
 	/*
@@ -5697,7 +5699,7 @@ uint8_t ol_txrx_get_mon_vdev_from_pdev(struct cdp_soc_t *soc_hdl,
 	struct ol_txrx_soc_t *soc = (struct ol_txrx_soc_t *)soc_hdl;
 	ol_txrx_pdev_handle pdev = ol_txrx_get_pdev_from_pdev_id(soc, pdev_id);
 
-	if (qdf_unlikely(!pdev))
+	if (qdf_unlikely(!pdev || !pdev->monitor_vdev))
 		return -EINVAL;
 
 	return pdev->monitor_vdev->vdev_id;

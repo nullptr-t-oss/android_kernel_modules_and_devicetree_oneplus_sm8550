@@ -34,6 +34,7 @@
 #include "wlan_hdd_main.h"
 #include "qdf_trace.h"
 #include <linux/netdevice.h>
+#include <linux/rtnetlink.h>
 #include <linux/skbuff.h>
 #include <linux/etherdevice.h>
 #include <net/ieee80211_radiotap.h>
@@ -718,6 +719,21 @@ wlan_hdd_set_ml_capab_add_iface(struct hdd_adapter_create_param *create_params,
 
 #endif
 
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+static void hdd_monitor_set_wext_compat(struct wiphy *wiphy, bool enable)
+{
+	if (enable)
+		wiphy->flags &= ~WIPHY_FLAG_SUPPORTS_MLO;
+	else
+		wiphy->flags |= WIPHY_FLAG_SUPPORTS_MLO;
+}
+#else
+static inline void
+hdd_monitor_set_wext_compat(struct wiphy *wiphy, bool enable)
+{
+}
+#endif
+
 /**
  * __wlan_hdd_add_virtual_intf() - Add virtual interface
  * @wiphy: wiphy pointer
@@ -824,6 +840,7 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 				return ERR_PTR(-EINVAL);
 
 			if (adapter) {
+				hdd_monitor_set_wext_compat(wiphy, true);
 				hdd_exit();
 				return adapter->dev->ieee80211_ptr;
 			}
@@ -885,6 +902,9 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 		ucfg_dp_try_send_rps_ind(vdev);
 		hdd_objmgr_put_vdev_by_user(vdev, WLAN_DP_ID);
 	}
+
+	if (mode == QDF_MONITOR_MODE)
+		hdd_monitor_set_wext_compat(wiphy, true);
 
 	hdd_exit();
 
@@ -975,6 +995,114 @@ void hdd_clean_up_interface(struct hdd_context *hdd_ctx,
 	hdd_close_adapter(hdd_ctx, adapter, true);
 }
 
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+static void hdd_monitor_restore_work_handler(void *arg)
+{
+	struct hdd_context *hdd_ctx = arg;
+	struct hdd_adapter *adapter;
+	int ret = 0;
+
+	rtnl_lock();
+	if (!hdd_ctx->monitor_restore_pending)
+		goto unlock;
+
+	adapter = hdd_get_adapter_by_iface_name(
+					hdd_ctx, hdd_ctx->monitor_restore_iface);
+	if (!adapter || adapter->delete_in_progress) {
+		hdd_err("Unable to restore preserved station %s",
+			hdd_ctx->monitor_restore_iface);
+		goto clear;
+	}
+
+	if (!(adapter->dev->flags & IFF_UP))
+		ret = dev_open(adapter->dev, NULL);
+
+	if (ret)
+		hdd_err("Failed to reopen preserved station %s: %d",
+			adapter->dev->name, ret);
+	else
+		hdd_info("Restored station interface %s after monitor teardown",
+			 adapter->dev->name);
+
+clear:
+	hdd_ctx->monitor_restore_pending = false;
+	hdd_ctx->monitor_restore_iface[0] = '\0';
+unlock:
+	rtnl_unlock();
+}
+
+QDF_STATUS hdd_monitor_restore_work_init(struct hdd_context *hdd_ctx)
+{
+	QDF_STATUS status;
+
+	status = qdf_create_work(0, &hdd_ctx->monitor_restore_work,
+				 hdd_monitor_restore_work_handler, hdd_ctx);
+	if (QDF_IS_STATUS_SUCCESS(status))
+		hdd_ctx->monitor_restore_work_status = HDD_WORK_INITIALIZED;
+
+	return status;
+}
+
+void hdd_monitor_restore_work_deinit(struct hdd_context *hdd_ctx)
+{
+	if (hdd_ctx->monitor_restore_work_status != HDD_WORK_INITIALIZED)
+		return;
+
+	qdf_cancel_work(&hdd_ctx->monitor_restore_work);
+	qdf_flush_work(&hdd_ctx->monitor_restore_work);
+	hdd_ctx->monitor_restore_work_status = HDD_WORK_UNINITIALIZED;
+	hdd_ctx->monitor_restore_pending = false;
+	hdd_ctx->monitor_restore_iface[0] = '\0';
+}
+
+static bool hdd_preserve_station_for_monitor(struct hdd_context *hdd_ctx,
+					     struct hdd_adapter *adapter)
+{
+	struct hdd_adapter *monitor;
+
+	if (adapter->device_mode != QDF_STA_MODE)
+		return false;
+
+	monitor = hdd_get_adapter(hdd_ctx, QDF_MONITOR_MODE);
+	if (!monitor || monitor->delete_in_progress)
+		return false;
+
+	if (hdd_ctx->monitor_restore_pending &&
+	    qdf_str_cmp(hdd_ctx->monitor_restore_iface, adapter->dev->name))
+		return false;
+
+	strscpy(hdd_ctx->monitor_restore_iface, adapter->dev->name,
+		IFNAMSIZ);
+	hdd_ctx->monitor_restore_pending = true;
+	hdd_info("Preserving station interface %s during monitor session",
+		 adapter->dev->name);
+
+	return true;
+}
+
+static void hdd_queue_monitor_station_restore(struct hdd_context *hdd_ctx)
+{
+	if (!hdd_ctx->monitor_restore_pending || !hdd_ctx->adapter_ops_wq ||
+	    hdd_ctx->monitor_restore_work_status != HDD_WORK_INITIALIZED)
+		return;
+
+	qdf_queue_work(0, hdd_ctx->adapter_ops_wq,
+		       &hdd_ctx->monitor_restore_work);
+}
+#else
+static inline bool
+hdd_preserve_station_for_monitor(struct hdd_context *hdd_ctx,
+				 struct hdd_adapter *adapter)
+{
+	return false;
+}
+
+static inline void
+hdd_queue_monitor_station_restore(struct hdd_context *hdd_ctx)
+{
+}
+#endif
+
 int __wlan_hdd_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 {
 	struct net_device *dev = wdev->netdev;
@@ -1036,6 +1164,14 @@ int wlan_hdd_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
 	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(wdev->netdev);
+	struct hdd_context *hdd_ctx = wiphy_priv(wiphy);
+	bool restore_station;
+
+	if (hdd_preserve_station_for_monitor(hdd_ctx, adapter))
+		return 0;
+
+	restore_station =
+		wlan_hdd_is_session_type_monitor(adapter->device_mode);
 
 	adapter->delete_in_progress = true;
 	errno = osif_vdev_sync_trans_start_wait(wdev->netdev, &vdev_sync);
@@ -1050,6 +1186,11 @@ int wlan_hdd_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 
 	osif_vdev_sync_trans_stop(vdev_sync);
 	osif_vdev_sync_destroy(vdev_sync);
+
+	if (!errno && restore_station) {
+		hdd_monitor_set_wext_compat(wiphy, false);
+		hdd_queue_monitor_station_restore(hdd_ctx);
+	}
 
 	return errno;
 }

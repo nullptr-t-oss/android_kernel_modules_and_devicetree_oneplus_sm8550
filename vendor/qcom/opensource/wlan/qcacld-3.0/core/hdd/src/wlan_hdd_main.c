@@ -2961,6 +2961,11 @@ static int __hdd_mon_open(struct net_device *dev)
 	hdd_enter_dev(dev);
 
 	if (test_bit(DEVICE_IFACE_OPENED, &adapter->event_flags)) {
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+		wlan_hdd_netif_queue_control(
+			adapter, WLAN_START_ALL_NETIF_QUEUE_N_CARRIER,
+			WLAN_CONTROL_PATH);
+#endif
 		hdd_debug_rl("Monitor interface is already up");
 		return 0;
 	}
@@ -2991,7 +2996,6 @@ static int __hdd_mon_open(struct net_device *dev)
 			hdd_err("hdd_start_adapters() successful !");
 		}
 		hdd_mon_turn_off_ps_and_wow(hdd_ctx);
-		set_bit(DEVICE_IFACE_OPENED, &adapter->event_flags);
 	}
 
 	if (con_mode != QDF_GLOBAL_MONITOR_MODE &&
@@ -3008,15 +3012,24 @@ static int __hdd_mon_open(struct net_device *dev)
 	if (!ret)
 		ret = hdd_enable_monitor_mode(dev);
 
-	if (!ret) {
-		param.policy = BBM_DRIVER_MODE_POLICY;
-		param.policy_info.driver_mode = QDF_GLOBAL_MONITOR_MODE;
-		ucfg_dp_bbm_apply_independent_policy(hdd_ctx->psoc, &param);
-		ucfg_dp_set_current_throughput_level(hdd_ctx->psoc,
-						     PLD_BUS_WIDTH_VERY_HIGH);
+	if (ret) {
+		clear_bit(DEVICE_IFACE_OPENED, &adapter->event_flags);
+		return ret;
 	}
 
-	return ret;
+	set_bit(DEVICE_IFACE_OPENED, &adapter->event_flags);
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	wlan_hdd_netif_queue_control(adapter,
+				     WLAN_START_ALL_NETIF_QUEUE_N_CARRIER,
+				     WLAN_CONTROL_PATH);
+#endif
+	param.policy = BBM_DRIVER_MODE_POLICY;
+	param.policy_info.driver_mode = QDF_GLOBAL_MONITOR_MODE;
+	ucfg_dp_bbm_apply_independent_policy(hdd_ctx->psoc, &param);
+	ucfg_dp_set_current_throughput_level(hdd_ctx->psoc,
+					     PLD_BUS_WIDTH_VERY_HIGH);
+
+	return 0;
 }
 
 /**
@@ -6230,6 +6243,7 @@ static const struct net_device_ops wlan_drv_ops = {
 static const struct net_device_ops wlan_mon_drv_ops = {
 	.ndo_open = hdd_mon_open,
 	.ndo_stop = hdd_stop,
+	.ndo_start_xmit = hdd_hard_start_xmit,
 	.ndo_get_stats = hdd_get_stats,
 };
 
@@ -6739,6 +6753,8 @@ bool hdd_is_vdev_in_conn_state(struct hdd_adapter *adapter)
 	case QDF_P2P_GO_MODE:
 		return (test_bit(SOFTAP_BSS_STARTED,
 				 &adapter->event_flags));
+	case QDF_MONITOR_MODE:
+		return false;
 	default:
 		hdd_err("Device mode %d invalid", adapter->device_mode);
 		return 0;
@@ -6993,7 +7009,10 @@ QDF_STATUS hdd_init_station_mode(struct hdd_adapter *adapter)
 
 	hdd_vdev_set_ht_vht_ies(mac_handle, vdev);
 	hdd_roam_profile_init(adapter);
-	hdd_register_wext(adapter->dev);
+	if (adapter->device_mode == QDF_MONITOR_MODE)
+		hdd_register_monitor_wext(adapter->dev);
+	else
+		hdd_register_wext(adapter->dev);
 
 	/* Set the default operation channel freq*/
 	sta_ctx->conn_info.chan_freq = hdd_ctx->config->operating_chan_freq;
@@ -11399,12 +11418,24 @@ static void hdd_adapter_param_update_work(void *arg)
 
 QDF_STATUS hdd_init_adapter_ops_wq(struct hdd_context *hdd_ctx)
 {
+	QDF_STATUS status;
+
 	hdd_enter();
 
 	hdd_ctx->adapter_ops_wq =
 		qdf_alloc_high_prior_ordered_workqueue("hdd_adapter_ops_wq");
-	if (!hdd_ctx->adapter_ops_wq)
+	if (!hdd_ctx->adapter_ops_wq) {
+		hdd_exit();
 		return QDF_STATUS_E_NOMEM;
+	}
+
+	status = hdd_monitor_restore_work_init(hdd_ctx);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_destroy_workqueue(0, hdd_ctx->adapter_ops_wq);
+		hdd_ctx->adapter_ops_wq = NULL;
+		hdd_exit();
+		return status;
+	}
 
 	hdd_exit();
 
@@ -11415,8 +11446,16 @@ void hdd_deinit_adapter_ops_wq(struct hdd_context *hdd_ctx)
 {
 	hdd_enter();
 
+	if (!hdd_ctx->adapter_ops_wq) {
+		hdd_exit();
+		return;
+	}
+
+	hdd_monitor_restore_work_deinit(hdd_ctx);
+
 	qdf_flush_workqueue(0, hdd_ctx->adapter_ops_wq);
 	qdf_destroy_workqueue(0, hdd_ctx->adapter_ops_wq);
+	hdd_ctx->adapter_ops_wq = NULL;
 
 	hdd_exit();
 }
@@ -13511,6 +13550,76 @@ hdd_adapter_set_wlm_client_latency_level(struct hdd_adapter *adapter)
 out:
 	hdd_debug("wlm initial mode %u", adapter->latency_level);
 }
+
+#if defined(CONFIG_WIRELESS_EXT) && defined(FEATURE_FRAME_INJECTION_SUPPORT)
+static int hdd_monitor_wext_giwname(struct net_device *dev,
+				    struct iw_request_info *info,
+				    union iwreq_data *wrqu, char *extra)
+{
+	strscpy(wrqu->name, "IEEE 802.11", IFNAMSIZ);
+
+	return 0;
+}
+
+static int hdd_monitor_wext_giwmode(struct net_device *dev,
+				    struct iw_request_info *info,
+				    union iwreq_data *wrqu, char *extra)
+{
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	int ret;
+
+	ret = hdd_validate_adapter(adapter);
+	if (ret)
+		return -EINVAL;
+
+	wrqu->mode = adapter->device_mode == QDF_MONITOR_MODE ?
+		IW_MODE_MONITOR : IW_MODE_INFRA;
+	return 0;
+}
+
+static int hdd_monitor_wext_giwfreq(struct net_device *dev,
+				    struct iw_request_info *info,
+				    union iwreq_data *wrqu, char *extra)
+{
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	struct hdd_monitor_ctx *mon_ctx;
+	int ret;
+
+	ret = hdd_validate_adapter(adapter);
+	if (ret || adapter->device_mode != QDF_MONITOR_MODE ||
+	    !adapter->deflink)
+		return -EINVAL;
+
+	mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter->deflink);
+	if (!mon_ctx->freq)
+		return -ENODATA;
+
+	wrqu->freq.m = mon_ctx->freq;
+	wrqu->freq.e = 6;
+
+	return 0;
+}
+
+static const iw_handler hdd_monitor_wext_handlers[] = {
+	[IW_IOCTL_IDX(SIOCGIWNAME)] = hdd_monitor_wext_giwname,
+	[IW_IOCTL_IDX(SIOCGIWFREQ)] = hdd_monitor_wext_giwfreq,
+	[IW_IOCTL_IDX(SIOCGIWMODE)] = hdd_monitor_wext_giwmode,
+};
+
+static const struct iw_handler_def hdd_monitor_wext_handler_def = {
+	.num_standard = QDF_ARRAY_SIZE(hdd_monitor_wext_handlers),
+	.standard = hdd_monitor_wext_handlers,
+};
+
+static void hdd_register_monitor_wext(struct net_device *dev)
+{
+	dev->wireless_handlers = &hdd_monitor_wext_handler_def;
+}
+#else
+static inline void hdd_register_monitor_wext(struct net_device *dev)
+{
+}
+#endif
 
 /**
  * hdd_start_station_adapter()- Start the Station Adapter
@@ -18110,6 +18219,7 @@ static void hdd_stop_present_mode(struct hdd_context *hdd_ctx,
 		hdd_info("Release wakelock for monitor mode!");
 		qdf_wake_lock_release(&hdd_ctx->monitor_mode_wakelock,
 				      WIFI_POWER_EVENT_WAKELOCK_MONITOR_MODE);
+		wma_injection_pre_stop_cleanup();
 		fallthrough;
 	case QDF_GLOBAL_MISSION_MODE:
 	case QDF_GLOBAL_FTM_MODE:
