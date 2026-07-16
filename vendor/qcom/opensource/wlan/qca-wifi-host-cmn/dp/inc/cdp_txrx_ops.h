@@ -967,6 +967,7 @@ struct cdp_me_ops {
 /**
  * struct cdp_mon_ops - host mon ops
  * @txrx_reset_monitor_mode: Handler to reset monitor mode
+ * @txrx_refresh_monitor_mode: Reapply the active monitor ring filters
  * @txrx_deliver_tx_mgmt: deliver mgmt tx frame
  * @txrx_set_advance_monitor_filter: set advanced monitor mode
  * @config_full_mon_mode: configure full monitor mode
@@ -976,6 +977,9 @@ struct cdp_mon_ops {
 
 	QDF_STATUS (*txrx_reset_monitor_mode)
 		(ol_txrx_soc_handle soc, uint8_t pdev_id, u_int8_t smart_monitor);
+
+	QDF_STATUS (*txrx_refresh_monitor_mode)
+		(ol_txrx_soc_handle soc, uint8_t pdev_id, uint8_t vdev_id);
 
 	QDF_STATUS (*txrx_deliver_tx_mgmt)
 		(struct cdp_soc_t *cdp_soc, uint8_t pdev_id, qdf_nbuf_t nbuf);

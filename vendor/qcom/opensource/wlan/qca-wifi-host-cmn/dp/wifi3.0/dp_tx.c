@@ -54,6 +54,19 @@
 #include <dp_sawf.h>
 #endif
 
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+#define DP_TX_INJECTION_DESC_PREFIX 0xf000
+
+static inline bool dp_tx_is_injection_nbuf(qdf_nbuf_t nbuf)
+{
+	return (QDF_NBUF_CB_MGMT_TXRX_DESC_ID(nbuf) &
+		DP_TX_INJECTION_DESC_PREFIX) == DP_TX_INJECTION_DESC_PREFIX;
+}
+
+extern bool wma_injection_dp_complete(void *wma_context, qdf_nbuf_t nbuf,
+				      int32_t status);
+#endif
+
 /* Flag to skip CCE classify when mesh or tid override enabled */
 #define DP_TX_SKIP_CCE_CLASSIFY \
 	(DP_TXRX_HLOS_TID_OVERRIDE_ENABLED | DP_TX_MESH_ENABLED)
@@ -2464,6 +2477,11 @@ qdf_nbuf_t dp_tx_comp_free_buf(struct dp_soc *soc, struct dp_tx_desc_s *desc,
 		dp_non_std_htt_tx_comp_free_buff(soc, desc);
 		return NULL;
 	}
+
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	if (dp_tx_is_injection_nbuf(nbuf))
+		wma_injection_dp_complete(NULL, nbuf, 0);
+#endif
 
 	/* 0 : MSDU buffer, 1 : MLE */
 	if (desc->msdu_ext_desc) {
@@ -5339,6 +5357,12 @@ void dp_tx_comp_process_tx_status(struct dp_soc *soc,
 	}
 
 	eh = (qdf_ether_header_t *)qdf_nbuf_data(nbuf);
+
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+	if (dp_tx_is_injection_nbuf(nbuf))
+		wma_injection_dp_complete(NULL, nbuf, ts->status);
+#endif
+
 	length = dp_tx_get_pkt_len(tx_desc);
 
 	dp_status = dp_tx_hw_to_qdf(ts->status);

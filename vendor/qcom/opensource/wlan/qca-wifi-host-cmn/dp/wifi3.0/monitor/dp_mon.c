@@ -534,6 +534,22 @@ fail:
 	return status;
 }
 
+static QDF_STATUS
+dp_refresh_monitor_mode(struct cdp_soc_t *dp_soc, uint8_t pdev_id,
+			uint8_t vdev_id)
+{
+	struct dp_soc *soc = (struct dp_soc *)dp_soc;
+	struct dp_pdev *pdev;
+
+	pdev = dp_get_pdev_from_soc_pdev_id_wifi3(soc, pdev_id);
+	if (!pdev || !pdev->monitor_pdev)
+		return QDF_STATUS_E_INVAL;
+	if (!pdev->monitor_pdev->monitor_configured)
+		return dp_vdev_set_monitor_mode(dp_soc, vdev_id, false);
+
+	return dp_mon_filter_update(pdev);
+}
+
 #ifdef QCA_TX_CAPTURE_SUPPORT
 static QDF_STATUS
 dp_config_tx_capture_mode(struct dp_pdev *pdev)
@@ -6054,6 +6070,7 @@ void dp_mon_cdp_ops_register(struct dp_soc *soc)
 	}
 
 	ops->cmn_drv_ops->txrx_set_monitor_mode = dp_vdev_set_monitor_mode;
+	ops->mon_ops->txrx_refresh_monitor_mode = dp_refresh_monitor_mode;
 	ops->cmn_drv_ops->txrx_get_mon_vdev_from_pdev =
 				dp_get_mon_vdev_from_pdev_wifi3;
 #ifdef DP_PEER_EXTENDED_API

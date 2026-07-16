@@ -583,6 +583,12 @@ static void dp_mon_filter_set_reset_mon_dest(struct dp_pdev *pdev,
 	if (pfilter->valid) {
 		dp_mon_filter_set_mon_cmn(pdev, pfilter);
 
+#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+		/* WCN7750 normally suppresses these FP frames to avoid duplicates. */
+		if (hal_get_target_type(soc->hal_soc) == TARGET_TYPE_WCN7750)
+			pfilter->tlv_filter.fp_mgmt_filter = FILTER_MGMT_ALL;
+#endif
+
 		dp_mon_filter_show_filter(mon_pdev, mode, pfilter);
 		mon_pdev->filter[mode][srng_type] = *pfilter;
 	} else /* reset the filter */
