@@ -81,6 +81,8 @@ struct blk_mq_alloc_data;
 /* clear ux type when dequeue */
 #define SA_TYPE_ONCE				(1 << 15)
 #define SA_TYPE_INHERIT				(1 << 16)
+/* SA_TYPE_COMBINED isn't marked in ux_state, it only exists in return value of function */
+#define SA_TYPE_COMBINED			(1 << 17)
 #define SA_TYPE_URGENT_MASK	(SA_TYPE_LIGHT|SA_TYPE_ANIMATOR|SA_TYPE_SWIFT)
 #define SCHED_ASSIST_UX_MASK	(SA_TYPE_LIGHT|SA_TYPE_HEAVY|SA_TYPE_ANIMATOR|SA_TYPE_LISTPICK|SA_TYPE_SWIFT)
 
@@ -146,8 +148,9 @@ eg: gerrit patchset "30438485"
 enum UX_STATE_TYPE {
 	UX_STATE_INVALID = 0,
 	UX_STATE_NONE,
-	UX_STATE_SCHED_ASSIST,
+	UX_STATE_STATIC,
 	UX_STATE_INHERIT,
+	UX_STATE_COMBINED,
 	MAX_UX_STATE_TYPE,
 };
 
@@ -376,6 +379,32 @@ static inline void oplus_set_im_flag(struct task_struct *t, int im_flag)
 	set_bit(im_flag, &ots->im_flag);
 }
 
+static inline int get_ots_ux_state(struct oplus_task_struct *ots)
+{
+	int ux_state;
+	int sub_ux_state;
+	int ux_prio;
+	int ret;
+
+	ux_prio = ots->ux_state & SCHED_ASSIST_UX_PRIORITY_MASK;
+	ux_state = ots->ux_state & (SCHED_ASSIST_UX_MASK | SA_TYPE_INHERIT);
+	sub_ux_state = ots->sub_ux_state & (SCHED_ASSIST_UX_MASK | SA_TYPE_INHERIT);
+
+	if (sub_ux_state) {
+		ret = ux_state | (sub_ux_state & ~SA_TYPE_INHERIT) | SA_TYPE_COMBINED;
+	} else {
+		ret = ux_state;
+	}
+
+	if (ret & SCHED_ASSIST_UX_MASK) {
+		return ux_prio | ret;
+	}
+
+	return 0;
+}
+
+bool is_multiple_ux(struct oplus_task_struct *ots);
+
 static inline int oplus_get_ux_state(struct task_struct *t)
 {
 	struct oplus_task_struct *ots = get_oplus_task_struct(t);
@@ -383,7 +412,43 @@ static inline int oplus_get_ux_state(struct task_struct *t)
 	if (IS_ERR_OR_NULL(ots))
 		return 0;
 
+	return get_ots_ux_state(ots);
+}
+
+static inline int oplus_get_static_ux_state(struct task_struct *t)
+{
+	struct oplus_task_struct *ots = get_oplus_task_struct(t);
+
+	if (IS_ERR_OR_NULL(ots))
+		return 0;
+
+	if (ots->ux_state & SA_TYPE_INHERIT) {
+		return 0;
+	}
 	return ots->ux_state;
+}
+
+static inline int oplus_get_sub_ux_state(struct task_struct *t)
+{
+	struct oplus_task_struct *ots = get_oplus_task_struct(t);
+
+	if (IS_ERR_OR_NULL(ots))
+		return 0;
+
+	return ots->sub_ux_state;
+}
+
+static inline int oplus_get_inherited_ux_state(struct task_struct *t)
+{
+	struct oplus_task_struct *ots = get_oplus_task_struct(t);
+
+	if (IS_ERR_OR_NULL(ots))
+		return 0;
+
+	if (ots->ux_state & SA_TYPE_INHERIT) {
+		return ots->ux_state;
+	}
+	return ots->sub_ux_state;
 }
 
 void oplus_set_ux_state_lock(struct task_struct *t, int ux_state, int inherit_type, bool need_lock_rq);
@@ -477,6 +542,7 @@ static inline void init_task_ux_info(struct task_struct *t)
 	RB_CLEAR_NODE(&ots->ux_entry);
 	RB_CLEAR_NODE(&ots->exec_time_node);
 	ots->ux_state = 0;
+	ots->sub_ux_state = 0;
 	atomic64_set(&ots->inherit_ux, 0);
 	ots->ux_depth = 0;
 	ots->enqueue_time = 0;
@@ -546,9 +612,9 @@ static inline void init_task_ux_info(struct task_struct *t)
 #endif
 };
 
-static inline bool test_sched_assist_ux_type(struct task_struct *task, unsigned int sa_ux_type)
+static inline bool test_ux_type(struct task_struct *task, int ux_type)
 {
-	return oplus_get_ux_state(task) & sa_ux_type;
+	return oplus_get_ux_state(task) & ux_type;
 }
 
 static inline bool is_heavy_ux_task(struct task_struct *t)
@@ -558,17 +624,7 @@ static inline bool is_heavy_ux_task(struct task_struct *t)
 	if (IS_ERR_OR_NULL(ots))
 		return false;
 
-	return ots->ux_state & SA_TYPE_HEAVY;
-}
-
-static inline bool is_anim_ux_task(struct task_struct *t)
-{
-	struct oplus_task_struct *ots = get_oplus_task_struct(t);
-
-	if (IS_ERR_OR_NULL(ots))
-		return false;
-
-	return ots->ux_state & SA_TYPE_ANIMATOR;
+	return get_ots_ux_state(ots) & SA_TYPE_HEAVY;
 }
 
 static inline bool sched_assist_scene(unsigned int scene)
@@ -605,7 +661,6 @@ bool is_mid_cluster(int cpu);
 bool im_mali(const char *comm);
 bool is_top(struct task_struct *p);
 bool task_is_runnable(struct task_struct *task);
-int get_ux_state(struct task_struct *task);
 struct oplus_rq *get_oplus_rq(struct rq *rq);
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
@@ -632,13 +687,10 @@ bool is_heavy_load_top_task(struct task_struct *p);
 bool test_task_is_fair(struct task_struct *task);
 bool test_task_is_rt(struct task_struct *task);
 
-bool prio_higher(int a, int b);
 bool test_task_ux(struct task_struct *task);
 bool test_task_ux_depth(int ux_depth);
 bool test_inherit_ux(struct task_struct *task, int type);
 bool test_set_inherit_ux(struct task_struct *task);
-bool test_task_identify_ux(struct task_struct *task, int id_type_ux);
-bool test_list_pick_ux(struct task_struct *task);
 int get_ux_state_type(struct task_struct *task);
 void sched_assist_target_comm(struct task_struct *task, const char *comm);
 unsigned int ux_task_exec_limit(struct task_struct *p);

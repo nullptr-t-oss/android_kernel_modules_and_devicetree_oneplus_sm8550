@@ -1446,6 +1446,10 @@ static int sc96257_get_running_mode(struct oplus_sc96257 *chip)
 		return 0;
 	}
 
+	if (!chip->rx_connected) {
+		chip->adapter_type = 0;
+		return 0;
+	}
 	if (chip->adapter_type != 0)
 		return chip->adapter_type;
 
@@ -1627,6 +1631,7 @@ static int sc96257_set_tx_start(struct oplus_chg_ic_dev *dev, bool start)
 		chg_info("set tx start ok\n");
 		chip->tx_status = TX_STATUS_ON;
 	}
+	chg_info("set tx start %d\n", start);
 
 	return rc;
 }

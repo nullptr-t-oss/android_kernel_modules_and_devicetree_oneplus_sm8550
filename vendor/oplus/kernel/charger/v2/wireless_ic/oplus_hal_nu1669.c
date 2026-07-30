@@ -1173,10 +1173,9 @@ static int nu1669_set_tx_start(struct oplus_chg_ic_dev *dev, bool start)
 		chg_err("set tx start err, rc=%d\n", rc);
 		return rc;
 	}
-	if (start) {
-		chg_info("set tx start ok\n");
+	if (start)
 		chip->tx_status = TX_STATUS_ON;
-	}
+	chg_info("set tx start %d\n", start);
 
 	return rc;
 }

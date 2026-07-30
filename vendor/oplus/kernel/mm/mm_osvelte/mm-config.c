@@ -18,6 +18,8 @@
 #define MAX_CMDLINE_PARAM_LEN 128
 char feature_disable1[MAX_CMDLINE_PARAM_LEN];
 
+#define MAX_UXMEM_POOL_SIZE 500
+
 #define MEM_1GB (1 << (30 - PAGE_SHIFT))
 #define MEM_2GB (2 << (30 - PAGE_SHIFT))
 #define MEM_3GB (3 << (30 - PAGE_SHIFT))
@@ -128,7 +130,9 @@ static void config_uxmem_opt_show(struct seq_file *m, struct config_data *cd)
 	struct config_oplus_bsp_uxmem_opt *config = (struct config_oplus_bsp_uxmem_opt *)cd->private;
 
 	seq_printf(m, "[%s]\n", cd->module_name);
-	seq_printf(m, "  enable: %d\n", config->enable);
+	seq_printf(m, " enable: %d\n", config->enable);
+	seq_printf(m, " order 0 pool size(MB): %d\n", config->page_pool_order0_mb);
+	seq_printf(m, " order 1 pool size(MB): %d\n", config->page_pool_order1_mb);
 }
 
 static void parse_uxmem_opt_dt(const struct device_node *root)
@@ -137,6 +141,7 @@ static void parse_uxmem_opt_dt(const struct device_node *root)
 	struct config_data *data;
 	struct device_node *node;
 	const char *name = module_name_uxmem_opt;
+	int err;
 
 	node = of_get_child_by_name(root, name);
 	if (!node)
@@ -149,6 +154,22 @@ static void parse_uxmem_opt_dt(const struct device_node *root)
 	}
 
 	config->enable = !of_property_read_bool(node, "feature-disable");
+
+	err = of_property_read_u32(node, "page_pool_order0_mb", &config->page_pool_order0_mb);
+	if (err) {
+		osvelte_logi("read page_pool_order0_mb fail(%d)\n", err);
+	} else if (config->page_pool_order0_mb > MAX_UXMEM_POOL_SIZE) {
+		osvelte_loge("page_pool_order0_mb %d too large, set to %d\n", config->page_pool_order0_mb, MAX_UXMEM_POOL_SIZE);
+		config->page_pool_order0_mb = MAX_UXMEM_POOL_SIZE;
+	}
+
+	err = of_property_read_u32(node, "page_pool_order1_mb", &config->page_pool_order1_mb);
+	if (err) {
+		osvelte_logi("read page_pool_order1_mb fail(%d)\n", err);
+	} else if (config->page_pool_order1_mb > MAX_UXMEM_POOL_SIZE) {
+		osvelte_loge("page_pool_order1_mb %d too large, set to %d\n", config->page_pool_order1_mb, MAX_UXMEM_POOL_SIZE);
+		config->page_pool_order1_mb = MAX_UXMEM_POOL_SIZE;
+	}
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data) {
@@ -356,6 +377,83 @@ static int config_list_show(struct seq_file *m, void *data)
 }
 DEFINE_PROC_SHOW_ATTRIBUTE(config_list);
 
+
+/******************************************************************************
+ *                          allocator
+ ******************************************************************************/
+static ssize_t tcache_disable_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	int size = 0;
+
+	sysfs_emit_at(buf, size, "1\n");
+	return size;
+}
+static struct kobj_attribute tcache_disable_attr = __ATTR_RO(tcache_disable);
+
+static struct attribute *attrs[] = {
+	&tcache_disable_attr.attr,
+	NULL,
+};
+
+static struct attribute_group attr_group = {
+	.attrs = attrs,
+};
+
+static void config_allocator_show(struct seq_file *m, struct config_data *cd)
+{
+	struct config_mm_allocator *config = (struct config_mm_allocator *)cd->private;
+
+	seq_printf(m, "[%s]\n", cd->module_name);
+	seq_printf(m, "  tcache_disable: %d\n", config->tcache_disable);
+}
+
+static void parse_allocator_dt(const struct device_node *root)
+{
+	struct config_mm_allocator *config;
+	struct config_data *data;
+	struct device_node *node;
+	const char *name = module_name_allocator;
+	struct kobject *allocator_kobj;
+
+	node = of_get_child_by_name(root, name);
+	if (!node)
+		return;
+
+	config = kzalloc(sizeof(*config), GFP_KERNEL);
+	if (!config) {
+		osvelte_loge("failed to allocate\n");
+		goto put_node;
+	}
+
+	if (oplus_test_mm_feature_disable(COMFD1_DISABLE_TCACHE_OFF))
+		osvelte_logi("tcache off disabled by cmdline");
+	else
+		config->tcache_disable = of_property_read_bool(node, "tcache-disable");
+
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	if (!data) {
+		osvelte_loge("failed to allocate config data\n");
+		kfree(config);
+		goto put_node;
+	}
+
+	data->module_name = name;
+	INIT_LIST_HEAD(&data->list);
+	data->private = config;
+	data->seq_show = config_allocator_show;
+	list_add_tail(&data->list, &config_list);
+
+	if (!config->tcache_disable)
+		goto put_node;
+
+	allocator_kobj = kobject_create_and_add(name, oplus_mm_kobj);
+	if (allocator_kobj && sysfs_create_group(allocator_kobj, &attr_group))
+	    osvelte_logi("allocator: disable tcache\n");
+	/* create allocator node */
+put_node:
+	of_node_put(node);
+}
+
 static int parse_mm_config_dt(const struct platform_device *pdev)
 {
 	const struct device_node *dt_node = pdev->dev.of_node;
@@ -385,6 +483,7 @@ static int parse_mm_config_dt(const struct platform_device *pdev)
 	parse_ezreclaimd_dt(child);
 	parse_kcompressed_dt(child);
 	parse_mglru_opt_dt(child);
+	parse_allocator_dt(child);
 	of_node_put(child);
 	return 0;
 }

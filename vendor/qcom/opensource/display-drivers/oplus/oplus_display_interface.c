@@ -42,7 +42,7 @@ int oplus_panel_cmd_print(struct dsi_panel *panel, enum dsi_cmd_set_type type)
 	case DSI_CMD_ESD_SWITCH_PAGE:
 	case DSI_CMD_SKIPFRAME_DBV:
 	case DSI_CMD_DEFAULT_SWITCH_PAGE:
-#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR_DEBUG
 	case DSI_CMD_ADFR_MIN_FPS_0:
 	case DSI_CMD_ADFR_MIN_FPS_1:
 	case DSI_CMD_ADFR_MIN_FPS_2:

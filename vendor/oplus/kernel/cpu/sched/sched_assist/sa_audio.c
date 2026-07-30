@@ -435,17 +435,13 @@ void oplus_sched_assist_audio_proc_remove(struct proc_dir_entry *dir)
 
 static void set_sched_boost(struct task_struct *p, bool enable)
 {
-	int ux_state = oplus_get_ux_state(p);
+	int ux_state = oplus_get_static_ux_state(p);
 
 	if (enable) {
-		/* If the task is already a inherit ux task, we unset it to avoid canceling audio ux when inherit ux is canceled. */
-		if (oplus_get_inherit_ux(p)) {
-			clear_all_inherit_type(p);
-			ux_state = 0;
-		}
-		oplus_set_ux_state_lock(p, (ux_state | UX_PRIORITY_AUDIO | SA_TYPE_SWIFT), -1, true);
+		/* swift gets UX_PRIORITY_AUDIO in default, no need to attach ux priority */
+		oplus_set_ux_state_lock(p, (ux_state | SA_TYPE_SWIFT), -1, true);
 	} else {
-		oplus_set_ux_state_lock(p, (ux_state & ~(SCHED_ASSIST_UX_PRIORITY_MASK | SA_TYPE_SWIFT)), -1, true);
+		oplus_set_ux_state_lock(p, (ux_state & ~SA_TYPE_SWIFT), -1, true);
 	}
 #if IS_ENABLED(CONFIG_SCHED_WALT)
 	if (!is_task_util_over(p, sa_audio_threshold_util))

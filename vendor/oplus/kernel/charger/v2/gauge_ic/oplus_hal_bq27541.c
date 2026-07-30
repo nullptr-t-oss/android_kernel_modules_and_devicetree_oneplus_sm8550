@@ -10397,6 +10397,7 @@ static int bq27541_driver_probe(struct i2c_client *client,
 	int ic_index;
 	struct oplus_chg_ic_cfg ic_cfg = { 0 };
 	int rc = 0;
+	struct device_node *node = NULL;
 
 	if (bq27541_need_level_shift(client->dev.of_node) &&
 	    !is_level_shift_available(client->dev.of_node)) {
@@ -10515,13 +10516,14 @@ rerun:
 	oplus_bq27541_init_sn_match(fg_ic);
 	atomic_set(&fg_ic->locked, 0);
 	bq28z610_afi_param_update(fg_ic);
-	rc = of_property_read_u32(fg_ic->dev->of_node, "oplus,ic_type",
+	node = oplus_get_node_by_child_gauge(fg_ic->dev->of_node);
+	rc = of_property_read_u32(node, "oplus,ic_type",
 				  &ic_type);
 	if (rc < 0) {
 		chg_err("can't get ic type, rc=%d\n", rc);
 		goto error;
 	}
-	rc = of_property_read_u32(fg_ic->dev->of_node, "oplus,ic_index",
+	rc = of_property_read_u32(node, "oplus,ic_index",
 				  &ic_index);
 	if (rc < 0) {
 		chg_err("can't get ic index, rc=%d\n", rc);

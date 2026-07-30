@@ -71,7 +71,12 @@ struct oplus_task_struct {
 	u64 vruntime;
 	u64 preset_vruntime;
 	s64 cfs_delta;
+	/* contains ux state
+	 1. if static and inherited ux both exist, static ux stores in ux_state, inherited ux in sub_ux_state.
+	 2. if only static ux exists, static ux stores in ux_state.
+	 2. if only inherited ux exists, inherited ux stores in ux_state */
 	int ux_state;
+	int sub_ux_state;
 	u8 ux_depth;
 	s8 ux_priority;
 	s8 ux_nice;

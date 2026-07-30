@@ -262,7 +262,7 @@ void oplus_replace_locking_task_fair(struct rq *rq, struct task_struct **p,
 		key_se = &key_task->se;
 
 		if (!test_task_is_fair(key_task) || !task_inlock(key_ots)
-			|| (key_task->flags & PF_EXITING) || unlikely(!key_se) || test_task_ux(key_task)) {
+			|| unlikely(!key_se) || test_task_ux(key_task)) {
 			list_del_init(&key_ots->locking_entry);
 			orq->rq_locking_task--;
 			put_task_struct(key_task);

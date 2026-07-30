@@ -45,7 +45,12 @@
 static unsigned long long high_wm = 0;
 /* true by default, false when oplus_bsp_dynamic_readahead.enable=N in cmdline */
 bool enable = true;
+int fault_around_bytes_adjustvalue = 0;
 module_param(enable, bool, S_IRUGO | S_IWUSR);
+module_param(fault_around_bytes_adjustvalue, int, S_IRUGO | S_IWUSR);
+
+static int background_ra_pages = 0;
+module_param(background_ra_pages, int, S_IRUGO | S_IWUSR);
 
 struct pglist_data *first_online_pgdat(void)
 {
@@ -100,14 +105,23 @@ static inline bool is_lowmem(void)
 	return global_zone_page_state(NR_FREE_PAGES) < high_wm;
 }
 
+static void tune_fault_around_bytes(void *data, unsigned long *fault_around_bytes)
+{
+	if (fault_around_bytes_adjustvalue)
+		*fault_around_bytes = fault_around_bytes_adjustvalue;
+}
+
 static void adjust_readaround(void *data, unsigned int ra_pages, pgoff_t offset,
 		pgoff_t *start, unsigned int *size, unsigned int *async_size)
 {
 	if (is_key_task(current))
 		return;
 
-	if (is_lowmem()) {
-		ra_pages /= 2;
+	if (background_ra_pages || is_lowmem()) {
+		if (background_ra_pages)
+			ra_pages = background_ra_pages;
+		if (is_lowmem())
+			ra_pages /= 2;
 		*start = max_t(long, 0, offset - ra_pages / 2);
 		*size = ra_pages;
 		*async_size = ra_pages / 4;
@@ -121,6 +135,8 @@ static void adjust_readahead(void *data, struct readahead_control *ractl, unsign
 	if (is_key_task(current))
 		return;
 
+	if (background_ra_pages)
+		*max_pages = min_t(long, *max_pages, background_ra_pages);
 	if (is_lowmem())
 		*max_pages = min_t(long, *max_pages, ra->ra_pages / 2);
 }
@@ -139,6 +155,8 @@ static int __init dynamic_readahead_init(void)
 		high_wm += high_wmark_pages(zone);
 	}
 
+	pr_info("set high_wm=%llu\n", high_wm);
+
 	ret = register_trace_android_vh_tune_mmap_readaround(adjust_readaround, NULL);
 	if (ret != 0) {
 		pr_err("register_trace_android_vh_tune_mmap_readaround failed! ret=%d\n", ret);
@@ -151,6 +169,12 @@ static int __init dynamic_readahead_init(void)
 		goto out;
 	}
 
+	ret = register_trace_android_vh_tune_fault_around_bytes(tune_fault_around_bytes, NULL);
+	if (ret != 0) {
+		pr_err("tune_fault_around_bytes vendor_hook register failed: %d\n", ret);
+		goto out;
+	}
+
 	pr_info("dynamic_readahead_init succeed!\n");
 out:
 	return ret;
@@ -160,6 +184,7 @@ static void __exit dynamic_readahead_exit(void)
 {
 	unregister_trace_android_vh_ra_tuning_max_page(adjust_readahead, NULL);
 	unregister_trace_android_vh_tune_mmap_readaround(adjust_readaround, NULL);
+	unregister_trace_android_vh_tune_fault_around_bytes(tune_fault_around_bytes, NULL);
 	pr_info("dynamic_readahead_exit succeed!\n");
 }
 

@@ -218,6 +218,9 @@ int oplus_ofp_init(void *dsi_panel)
 	OFP_INFO("fp_type_compatible_mode:%d\n", p_oplus_ofp_params->fp_type_compatible_mode);
 	oplus_ofp_fp_type_compatible_mode_config();
 
+	p_oplus_ofp_params->fp_local_hbm_calibration = utils->read_bool(utils->data, "oplus,ofp-fp-local-hbm-calibration");
+	OFP_INFO("fp_local_hbm_calibration:%d\n", p_oplus_ofp_params->fp_local_hbm_calibration);
+
 	if (oplus_ofp_is_supported()) {
 		/* indicates whether gamut needs to be bypassed in aod/fod scenarios or not */
 		p_oplus_ofp_params->need_to_bypass_gamut = utils->read_bool(utils->data, "oplus,ofp-need-to-bypass-gamut");
@@ -3832,7 +3835,7 @@ ssize_t oplus_ofp_set_hbm_attr(struct kobject *obj,
 	OFP_INFO("oplus_ofp_hbm_mode:%u\n", p_oplus_ofp_params->hbm_mode);
 	OPLUS_OFP_TRACE_INT("oplus_ofp_hbm_mode", p_oplus_ofp_params->hbm_mode);
 
-	if (oplus_ofp_local_hbm_is_enabled()) {
+	if (oplus_ofp_local_hbm_is_enabled() && !(p_oplus_ofp_params->fp_local_hbm_calibration)) {
 		if (p_oplus_ofp_params->hbm_mode) {
 			rc = oplus_ofp_display_cmd_set(display, DSI_CMD_LHBM_PRESSED_ICON_ON);
 			if (rc) {

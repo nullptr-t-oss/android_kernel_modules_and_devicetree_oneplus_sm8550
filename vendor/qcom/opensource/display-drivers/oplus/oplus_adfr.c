@@ -1275,6 +1275,7 @@ int oplus_adfr_irq_handler(void *sde_encoder_phys, unsigned int irq_type)
 	struct sde_connector *c_conn = NULL;
 	struct dsi_display *display = NULL;
 	struct oplus_adfr_params *p_oplus_adfr_params = NULL;
+	static unsigned last_rd_irq_interval = 0;
 
 	ADFR_DEBUG("start\n");
 
@@ -1321,12 +1322,25 @@ int oplus_adfr_irq_handler(void *sde_encoder_phys, unsigned int irq_type)
 	OPLUS_ADFR_TRACE_BEGIN("oplus_adfr_irq_handler");
 
 	if (irq_type == OPLUS_ADFR_RD_PTR) {
+		struct dsi_display_mode_priv_info *priv_info = NULL;
+        	if (!display->panel || !display->panel->cur_mode) {
+            		ADFR_ERR("display->panel or cur_mode is NULL\n");
+            		return -EINVAL;
+        	}
+        	priv_info = display->panel->cur_mode->priv_info;
 		ADFR_DEBUG("rd_ptr_irq interval:%lu\n", ((unsigned long)ktime_to_us(ktime_get()) - rd_ptr_timestamp_us));
 		last_rd_ptr_timestamp_us = rd_ptr_timestamp_us;
 		rd_ptr_timestamp_us = (unsigned long)ktime_to_us(ktime_get());
 		ADFR_DEBUG("rd_ptr_timestamp_us:%u, last_rd_ptr_timestamp_us:%u\n", rd_ptr_timestamp_us, last_rd_ptr_timestamp_us);
 		OPLUS_ADFR_TRACE_INT("rd_ptr_timestamp_us", rd_ptr_timestamp_us);
 		OPLUS_ADFR_TRACE_INT("last_rd_ptr_timestamp_us", last_rd_ptr_timestamp_us);
+		if (priv_info) {
+			priv_info->rd_irq_interval = (rd_ptr_timestamp_us - last_rd_ptr_timestamp_us) / 1000;
+			if (priv_info->rd_irq_interval != last_rd_irq_interval) {   /* When TE > 10ms , print info */
+				pr_err("rd_ptr_irq interval=%lu ms\n", priv_info->rd_irq_interval);
+				last_rd_irq_interval = priv_info->rd_irq_interval;
+			}
+		}
 
 		/* high precision cmds are taking effect in panel module */
 		if (last_panel_high_precision_state != p_oplus_adfr_params->high_precision_state) {

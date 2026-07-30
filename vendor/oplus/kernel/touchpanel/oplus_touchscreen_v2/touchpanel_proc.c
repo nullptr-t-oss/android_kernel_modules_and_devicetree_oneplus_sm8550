@@ -4387,6 +4387,81 @@ static ssize_t proc_glove_mode_read(struct file *file, char __user *buffer,
 DECLARE_PROC_OPS(proc_glove_mode, simple_open,
 		  proc_glove_mode_read, proc_glove_mode_write, NULL);
 
+/*proc/touchpanel/rainstorm_mode_enable*/
+static ssize_t proc_rainstorm_mode_write(struct file *file, const char __user *buffer,
+				  size_t count, loff_t *ppos)
+{
+	int ret = 0;
+	int value = 0;
+	size_t copy_len = 0;
+	char buf[4] = {0};
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+	if (!ts || !ts->ts_ops) {
+		TPD_INFO("%s: ts is NULL\n", __func__);
+		return count;
+	}
+
+	if (!ts->ts_ops->mode_switch) {
+		TS_TP_INFO("not support ts_ops->mode_switch callback\n");
+		return count;
+	}
+
+	copy_len = min(count, (size_t)3);
+	if (tp_copy_from_user(buf, sizeof(buf), buffer, copy_len, copy_len)) {
+        TS_TP_INFO("%s: read proc input error.\n", __func__);
+		return count;
+	}
+	buf[copy_len] = '\0';
+
+	if (kstrtoint(buf, 10, &value)) {
+		TP_INFO(ts->tp_index, "%s: kstrtoint error\n", __func__);
+		return count;
+	}
+
+	mutex_lock(&ts->mutex);
+	if (ts->is_suspended) {
+		TS_TP_INFO("%s: is_suspended, exit\n", __func__);
+		mutex_unlock(&ts->mutex);
+		return count;
+	}
+
+	ts->rainstorm_enable = !!value;
+
+	TP_INFO(ts->tp_index, "%s: rainstorm_enable value=%d\n", __func__, value);
+
+	ret = ts->ts_ops->mode_switch(ts->chip_data, MODE_RAINSTORM, ts->rainstorm_enable);
+	if (ret < 0) {
+		TS_TP_INFO("%s, Touchpanel operate rainstorm mode switch failed\n", __func__);
+	}
+	mutex_unlock(&ts->mutex);
+
+	return count;
+}
+
+static ssize_t proc_rainstorm_mode_read(struct file *file, char __user *buffer,
+				 size_t count, loff_t *ppos)
+{
+	int ret = 0;
+	char page[PAGESIZE] = {0};
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+	if (!ts) {
+		snprintf(page, PAGESIZE - 1, "%d\n", -1); /*no support*/
+		TPD_INFO("rainstorm mode enable is no support \n");
+		ret = simple_read_from_buffer(buffer, count, ppos, page, strlen(page));
+		return ret;
+	} else {
+		/*support*/
+		snprintf(page, PAGESIZE - 1, "%d\n", ts->rainstorm_enable);
+		ret = simple_read_from_buffer(buffer, count, ppos, page, strlen(page));
+		return ret;
+	}
+}
+
+DECLARE_PROC_OPS(proc_rainstorm_mode, simple_open,
+		  proc_rainstorm_mode_read, proc_rainstorm_mode_write, NULL);
+
 /*proc/touchpanel/leather_cover_enable*/
 static ssize_t proc_leather_cover_enable_write(struct file *file, const char __user *buffer,
 				  size_t count, loff_t *ppos)
@@ -5024,6 +5099,9 @@ int init_touchpanel_proc(struct touchpanel_data *ts)
 		},
 		{"aiunit_game_info", 0666, NULL, &proc_aiunit_game_info_ops, ts, false,
 			ts->aiunit_game_info_support
+		},
+		{
+			"rainstorm_mode", 0666, NULL, &proc_rainstorm_mode, ts, false, ts->rainstorm_mode_v2_support
 		},
 	};
 

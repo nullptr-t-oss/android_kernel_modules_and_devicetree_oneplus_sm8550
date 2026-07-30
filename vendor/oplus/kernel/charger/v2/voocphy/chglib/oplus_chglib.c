@@ -461,6 +461,11 @@ int oplus_chglib_notify_ap(struct device *dev, int event)
 	return 0;
 }
 
+void oplus_chglib_set_ovp_forced(bool enable)
+{
+	oplus_set_ovp_forced(enable);
+}
+
 int oplus_chglib_push_break_code(struct device *dev, int code)
 {
 	struct vphy_chip *chip = oplus_chglib_get_vphy_chip(dev);

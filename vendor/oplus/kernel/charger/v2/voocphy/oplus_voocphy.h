@@ -810,6 +810,7 @@ struct oplus_voocphy_manager {
 	struct delayed_work clear_boost_work;
 	struct delayed_work voocphy_send_ongoing_notify;
 	struct delayed_work recovery_system_work;
+	struct delayed_work pcc_work;
 	struct work_struct first_ask_batvol_work;
 	atomic_t  voocphy_freq_state;
 	bool recovery_system_done;
@@ -946,6 +947,13 @@ struct oplus_voocphy_manager {
 	bool slave_ic_abnormal;
 	struct delayed_work clear_ic_abnormal_status_work;
 	struct oplus_chg_strategy *svooc_pcc_strategy;
+	bool svooc_pcc_strategy_v2;
+
+	bool vbus_adjust_new_method;
+	bool vbus_adjust_done;
+	bool in_vbus_adjust_trans;
+	u8 vbus_adjust_hold_cnt;
+	u8 last_vooc_vbus_status;
 };
 
 struct oplus_voocphy_operations {
