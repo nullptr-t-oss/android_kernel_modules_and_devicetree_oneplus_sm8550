@@ -476,23 +476,11 @@ static long oplus_chg_ioctl(struct file *fp, unsigned code, unsigned long value)
 
 static int oplus_chg_open(struct inode *ip, struct file *fp)
 {
-	struct oplus_batt_bal_chip *chip = container_of(fp->private_data,
-		struct oplus_batt_bal_chip, misc_dev);
-
-	if (chip == NULL)
-		return -EINVAL;
-
 	return 0;
 }
 
 static int oplus_chg_release(struct inode *ip, struct file *fp)
 {
-	struct oplus_batt_bal_chip *chip = container_of(fp->private_data,
-		struct oplus_batt_bal_chip, misc_dev);
-
-	if (chip == NULL)
-		return -EINVAL;
-
 	return 0;
 }
 
@@ -1014,7 +1002,6 @@ static int oplus_batt_bal_status_record(struct oplus_batt_bal_chip *chip)
 	int index = 0;
 	int pmos_status = oplus_batt_bal_get_pmos_enable(chip);
 	int hw_status = oplus_batt_bal_get_enable(chip);
-	bool supplementary_power_mos_status = oplus_wired_get_supplementary_power_mos();
 
 	index += snprintf(&(chip->status_record[index]), BATT_BAL_STATUS_RECORD_LEN - index,
 		"pmos_status=%d;hw_status=%d;dir_flow=%s;target_iref=%d;",
@@ -1023,9 +1010,9 @@ static int oplus_batt_bal_status_record(struct oplus_batt_bal_chip *chip)
 		"b1_vol=%d;b2_vol=%d;b1_curr=%d;b2_curr=%d;",
 		chip->b1_volt, chip->b2_volt, chip->b1_curr, chip->b2_curr);
 	index += snprintf(&(chip->status_record[index]), BATT_BAL_STATUS_RECORD_LEN - index,
-		"vbatt_diff=%d;cbatt_diff=%d;state_machine=%d;abnormal_state=%d supplementary_mos=%d\n",
+		"vbatt_diff=%d;cbatt_diff=%d;state_machine=%d;abnormal_state=%d\n",
 		chip->b2_volt - chip->b1_volt, (chip->b2_curr - chip->b1_curr) / 2,
-		chip->curr_bal_state, chip->abnormal_state, supplementary_power_mos_status);
+		chip->curr_bal_state, chip->abnormal_state);
 
 	chg_debug("index=%d\n", index);
 
@@ -1330,16 +1317,24 @@ static const struct oplus_mms_desc oplus_mms_batt_bal_desc = {
 static void oplus_batt_bal_check_batt_temp_region(
 	struct oplus_batt_bal_chip *chip)
 {
+	int rc = 0;
+
 	if (!chip)
 		return;
 
-	if (chip->b1_inr_strategy)
-		oplus_chg_strategy_get_data(
+	if (chip->b1_inr_strategy) {
+		rc = oplus_chg_strategy_get_data(
 			chip->b1_inr_strategy, &chip->b1_temp_region);
+		if (rc < 0)
+			chg_err("can't get b1_temp_region, rc=%d\n", rc);
+	}
 
-	if (chip->b2_inr_strategy)
-		oplus_chg_strategy_get_data(
+	if (chip->b2_inr_strategy) {
+		rc = oplus_chg_strategy_get_data(
 			chip->b2_inr_strategy, &chip->b2_temp_region);
+		if (rc < 0)
+			chg_err("can't get b2_temp_region, rc=%d\n", rc);
+	}
 
 	if (chip->b1_temp_region >= chip->cfg.bal_temp_region_count)
 		chip->b1_temp_region = chip->cfg.bal_temp_region_count - 1;
@@ -3249,16 +3244,6 @@ static void oplus_batt_bal_wls_subs_callback(struct mms_subscribe *subs,
 				schedule_work(&chip->update_bal_state_work);
 			}
 			chg_info("charging_enable =%d\n", chip->wls_charging_enable);
-			break;
-		case WLS_ITEM_FASTCHG_STATUS:
-			oplus_mms_get_item_data(chip->wls_topic, id, &data, false);
-			if (chip->wls_fastchg_ing != data.intval) {
-				chip->wls_fastchg_ing = !!data.intval;
-				if (chip->wls_fastchg_ing)
-					queue_work(system_highpri_wq, &chip->batt_bal_disable_bal_work);
-				schedule_work(&chip->update_bal_state_work);
-			}
-			chg_info("wls_fastchg_ing =%d\n", chip->wls_fastchg_ing);
 			break;
 		default:
 			break;

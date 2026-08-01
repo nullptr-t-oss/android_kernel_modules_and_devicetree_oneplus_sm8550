@@ -274,6 +274,7 @@ enum command {
 	CMD_DOWNLOAD_CONFIG = 0x30,
 	CMD_ENTER_PRODUCTION_TEST_MODE = 0x31,
 	CMD_GET_FEATURES = 0x32,
+	CMD_SET_LONG_CONFIG = 0x34,
 	CMD_GET_ROMBOOT_INFO = 0x40,
 	CMD_WRITE_PROGRAM_RAM = 0x41,
 	CMD_ROMBOOT_RUN_BOOTLOADER_FIRMWARE = 0x42,
@@ -515,6 +516,7 @@ struct syna_tcm_hcd {
 	struct synaptics_proc_operations *syna_ops;
 	struct firmware_headfile *p_firmware_headfile;
 	struct firmware *tcm_firmware_headfile;
+	struct touchpanel_data *ts;
 
 	struct workqueue_struct *helper_workqueue;
 	struct work_struct helper_work;
@@ -551,6 +553,7 @@ struct syna_tcm_hcd {
 	int zeroflash_init_done;
 	int check_uboot_failed_count;
 	int request_fw_image_id;
+	int tp_index;
 
 	struct completion config_complete;
 	struct mutex reset_mutex;

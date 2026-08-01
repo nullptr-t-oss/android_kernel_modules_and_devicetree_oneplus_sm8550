@@ -95,6 +95,7 @@ struct oplus_configfs_device {
 	struct delayed_work eis_timeout_work;
 	struct delayed_work plc_enable_work;
 	struct delayed_work clean_plc_enable_work;
+	struct delayed_work plc_status_change_work;
 
 	struct votable *wired_icl_votable;
 	struct votable *wired_fcc_votable;
@@ -3093,6 +3094,114 @@ static ssize_t bt_info_store(struct device *dev, struct device_attribute *attr, 
 }
 static DEVICE_ATTR_WO(bt_info);
 
+static ssize_t wlspen_info_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct oplus_configfs_device *chip = NULL;
+
+	if (!dev || !buf) {
+		chg_err("dev or buf is NULL\n");
+		return -EINVAL;
+	}
+
+	chip = dev->driver_data;
+	if (!chip || !chip->wls_topic) {
+		chg_err("chip or wls is NULL\n");
+		return -ENODEV;
+	}
+
+	count = oplus_chg_wls_wlspen_info_store(chip->wls_topic, buf, count);
+
+	return count;
+}
+static DEVICE_ATTR_WO(wlspen_info);
+
+static ssize_t wlspen_soc_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct oplus_configfs_device *chip = NULL;
+	union mms_msg_data data = { 0 };
+	int rc;
+
+	if (!dev || !buf) {
+		chg_err("dev or buf is NULL\n");
+		return -EINVAL;
+	}
+
+	chip = dev->driver_data;
+	if (!chip || !chip->wls_topic) {
+		chg_err("chip or wls is NULL\n");
+		return -ENODEV;
+	}
+
+	rc = oplus_mms_get_item_data(chip->wls_topic, WLS_ITEM_WLSPEN_SOC, &data, true);
+	if (rc < 0) {
+		chg_err("can't get wlspen_soc, rc=%d\n", rc);
+		return rc;
+	}
+
+	return snprintf(buf, 16, "%d\n", data.intval);
+}
+
+static ssize_t wlspen_soc_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct oplus_configfs_device *chip = NULL;
+
+	if (!dev || !buf) {
+		chg_err("dev or buf is NULL\n");
+		return -EINVAL;
+	}
+
+	chip = dev->driver_data;
+	if (!chip || !chip->wls_topic) {
+		chg_err("chip or wls is NULL\n");
+		return -ENODEV;
+	}
+
+	count = oplus_chg_wls_wlspen_soc_store(chip->wls_topic, buf, count);
+
+	return count;
+}
+static DEVICE_ATTR_RW(wlspen_soc);
+
+static ssize_t wlspen_dischg_soc_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct oplus_configfs_device *chip = NULL;
+
+	if (!dev || !buf) {
+		chg_err("dev or buf is NULL\n");
+		return -EINVAL;
+	}
+
+	chip = dev->driver_data;
+	if (!chip || !chip->wls_topic) {
+		chg_err("chip or wls is NULL\n");
+		return -ENODEV;
+	}
+
+	count = oplus_chg_wls_wlspen_dischg_soc_store(chip->wls_topic, buf, count);
+
+	return count;
+}
+static DEVICE_ATTR_WO(wlspen_dischg_soc);
+
+static ssize_t ping_time_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct oplus_configfs_device *chip = dev->driver_data;
+	union mms_msg_data data = { 0 };
+	int ping_time = 0;
+	int rc;
+
+	if (chip->wls_topic) {
+		rc = oplus_mms_get_item_data(chip->wls_topic, WLS_ITEM_PING_TIME, &data, true);
+		if (rc < 0)
+			chg_err("can't get ping time, rc=%d\n", rc);
+		else
+			ping_time = data.intval;
+	}
+
+	return snprintf(buf, 16, "%d\n", ping_time);
+}
+static DEVICE_ATTR_RO(ping_time);
+
 #ifdef WLS_QI_DEBUG
 ssize_t __attribute__((weak))
 oplus_chg_wls_upgrade_fw_show(struct oplus_mms *mms, char *buf)
@@ -3146,6 +3255,10 @@ static struct device_attribute *oplus_wireless_attributes[] = {
 	&dev_attr_status_keep,
 	&dev_attr_rx_disable,
 	&dev_attr_bt_info,
+	&dev_attr_wlspen_info,
+	&dev_attr_wlspen_soc,
+	&dev_attr_wlspen_dischg_soc,
+	&dev_attr_ping_time,
 #ifdef WLS_QI_DEBUG
 	&dev_attr_upgrade_firmware,
 #endif
@@ -3439,6 +3552,17 @@ static void oplus_configfs_plc_enable_work(struct work_struct *work)
 	rc = oplus_chg_plc_enable(chip->plc_topic, true);
 	if (rc < 0)
 		chg_err("plc enable error, rc=%d\n", rc);
+}
+
+static void oplus_configfs_plc_status_change_work(struct work_struct *work)
+{
+	struct power_supply *batt_psy;
+
+	batt_psy = power_supply_get_by_name("battery");
+	if (batt_psy) {
+		oplus_power_supply_changed_gp(batt_psy, 0);
+		power_supply_put(batt_psy);
+	}
 }
 
 #define CLEAN_PLC_ENABLE_DELAY_MS 1600
@@ -5773,6 +5897,8 @@ static void oplus_configfs_plc_subs_callback(struct mms_subscribe *subs,
 		switch (id) {
 		case PLC_ITEM_STATUS:
 			oplus_mms_get_item_data(chip->plc_topic, id, &data, false);
+			if (chip->plc_status != data.intval)
+				schedule_delayed_work(&chip->plc_status_change_work, 0);
 			chip->plc_status = data.intval;
 			chg_info(" update plc_status=%d\n", chip->plc_status);
 			break;
@@ -5951,6 +6077,7 @@ static __init int oplus_configfs_init(void)
 	INIT_DELAYED_WORK(&chip->eis_timeout_work, oplus_configfs_eis_timeout_work);
 	INIT_DELAYED_WORK(&chip->plc_enable_work, oplus_configfs_plc_enable_work);
 	INIT_DELAYED_WORK(&chip->clean_plc_enable_work, oplus_configfs_clean_plc_enable_work);
+	INIT_DELAYED_WORK(&chip->plc_status_change_work, oplus_configfs_plc_status_change_work);
 	init_completion(&chip->sec_ic_test_res.ack);
 	mutex_init(&chip->sec_ic_test_res.lock);
 

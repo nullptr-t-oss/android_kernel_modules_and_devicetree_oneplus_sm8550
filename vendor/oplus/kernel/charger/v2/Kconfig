@@ -120,6 +120,12 @@ config OPLUS_GAUGE_MPC7022
 	help
 	  Say Y here to declare GAUGE MPC7022 support
 
+config OPLUS_GAUGE_SH366002
+	bool "GAUGE SH366002 support"
+	default n
+	help
+	  Say Y here to declare GAUGE SH366002 support
+
 config OPLUS_GAUGE_BQ27Z561
 	bool "GAUGE BQ27Z561 support"
 	help
@@ -134,6 +140,12 @@ config OPLUS_GAUGE_NFG8011B
 	bool "GAUGE NFG8011B support"
 	help
 	  Say Y here to declare GAUGE NFG8011B support
+
+config OPLUS_GAUGE_BQ28Z610_RA
+	bool "GAUGE BQ28Z610 RA support"
+	default n
+	help
+	  Say Y here to declare GAUGE BQ28Z610 RA support
 
 config OPLUS_GAUGE_CW2217B
 	bool "GAUGE CW2217B support"

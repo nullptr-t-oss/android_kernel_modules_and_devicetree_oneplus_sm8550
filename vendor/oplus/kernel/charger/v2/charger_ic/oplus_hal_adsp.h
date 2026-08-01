@@ -179,6 +179,9 @@ enum oplus_ap_message_id {
 	AP_MESSAGE_GET_GAUGE_LIFETIME_INFO,
 	AP_MESSAGE_GET_GAUGE_R_INFO,
 	AP_MESSAGE_GET_GAUGE_THREE_LEVEL_TERM_VOLT,
+	AP_MESSAGE_GET_GAUGE_RA0_INFO,
+	AP_MESSAGE_GET_GAUGE_IMP_INFO,
+	AP_MESSAGE_GET_GAUGE_DELTA_VOLTAGE_INFO,
 	AP_MESSAGE_MAX_SIZE = 32,
 };
 
@@ -386,6 +389,8 @@ enum usb_property_id {
 	USB_REVERSE_CHG_SET_CURRENT,
 	USB_RVS_HIGH_MODE_EN,
 	USB_SET_WIRED_USB_STATUS,
+	/* PD partner SVID (lower 16 bits valid) */
+	USB_ADAPTER_SVID,
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
 	USB_PROP_MAX,
 };
@@ -645,6 +650,7 @@ struct oplus_chg_iio {
 	struct iio_channel	*vph_pwr_chan;
 	struct iio_channel	*vbat_sns_qbg_chan;
 	struct iio_channel	*pmic_vbat_adc;
+	struct iio_channel	*shaft_btb_temp_chan;
 };
 
 enum oplus_sub_btb_adc_index {
@@ -811,6 +817,10 @@ struct battery_chg_dev {
 	struct work_struct		gauge_cali_track_by_full_work;
 	struct mutex                    pre_info_lock;
 	struct mutex                    cur_info_lock;
+
+	struct work_struct	gauge_ra0_check_work;
+	struct work_struct	gauge_imp_check_work;
+	struct work_struct	gauge_delta_voltage_check_work;
 #endif
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	int vchg_trig_irq;
@@ -891,7 +901,10 @@ struct battery_chg_dev {
 	int batt_full_para[CHARGING_TYPE_MAX][QBG_TEMP_MAX];
 	int batt_full_temp[QBG_TEMP_MAX];
 	bool batt_full_method_new;
+	bool power_mos_status;
+	bool need_check_mos;
 	bool pd_check_completed;
+	int mos_retry_cnt;
 	atomic_t is_shaft_btb_over;
 	bool adsp_reboot_discnt_chg_support;
 };

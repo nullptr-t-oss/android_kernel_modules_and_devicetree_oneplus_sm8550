@@ -35,7 +35,7 @@
 #include <linux/mutex.h>
 
 
-#define SIPA_DRIVER_VERSION					("3.0.8")
+#define SIPA_DRIVER_VERSION					("3.0.8-1016")
 #define SIPA_MAX_CHANNEL_SUPPORT			(8)
 
 struct sipa_err {

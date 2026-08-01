@@ -37,6 +37,10 @@
 #define APP_STATUS_POLL_TIMEOUT_MS 1000
 #define APP_STATUS_POLL_MS 100
 
+#define SYNA_CMD_GAME_AIUINIT_EN            0xF4
+#define SYNA_CMD_GAME_AIUINIT               0xFF
+#define AIUNIT_LONG_NUM         MAX_AIUNIT_SET_NUM*10
+
 DECLARE_COMPLETION(response_complete);
 DECLARE_COMPLETION(report_complete);
 
@@ -5335,6 +5339,107 @@ static int syna_tcm_diaphragm_touch_lv_set(void *chip_data, int level)
 	return 0;
 }
 
+static int syna_tcm_set_long_config(struct syna_tcm_hcd *tcm_hcd, unsigned char *buf)
+{
+	int retval = 0;
+	char *report = NULL;
+	unsigned char out_buf[AIUNIT_LONG_NUM + 1] = {0};
+	unsigned char *resp_buf = NULL;
+	unsigned int resp_buf_size = 0, resp_length = 0;
+	unsigned int i = 0;
+
+	TPD_DEBUG("%s:config 0x%x\n", __func__, buf[0]);
+
+	for (i = 0; i < (AIUNIT_LONG_NUM+1); i++) {
+	   out_buf[i] = buf[i];
+	}
+
+	retval = syna_tcm_write_message(tcm_hcd,
+					CMD_SET_LONG_CONFIG,
+					out_buf,
+					sizeof(out_buf),
+					&resp_buf,
+					&resp_buf_size,
+					&resp_length,
+					RESPONSE_TIMEOUT_MS_SHORT);
+
+	if (retval < 0) {
+		TP_INFO(tcm_hcd->tp_index, "Failed to write command %s\n", STR(CMD_SET_LONG_CONFIG));
+		report = tp_kzalloc(30, GFP_KERNEL);
+		if (report) {
+			tp_healthinfo_report(tcm_hcd->monitor_data, HEALTH_REPORT, report);
+			tp_kfree((void **)&report);
+		}
+		goto exit;
+	}
+
+exit:
+	tp_kfree((void **)&resp_buf);
+
+	return retval;
+}
+
+static void syna_aiunit_game_info(void *chip_data)
+{
+	struct syna_tcm_hcd *tcm_hcd = (struct syna_tcm_hcd *)chip_data;
+	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
+	u8 cmd[MAX_AIUNIT_SET_NUM * 10 + 1] = { 0 };
+	int i = 0;
+	int ret = 0;
+	unsigned short regval = 0;
+
+	if (tcm_hcd == NULL) {
+		return;
+	}
+
+	if (ts->is_suspended) {
+		return;
+	}
+	if (ts->aiunit_game_enable) {
+		ret = syna_tcm_set_dynamic_config(tcm_hcd, SYNA_CMD_GAME_AIUINIT_EN, 1);
+		ret = syna_tcm_get_dynamic_config(tcm_hcd, SYNA_CMD_GAME_AIUINIT_EN, &regval);
+		if (regval == 1) {
+			TPD_INFO("%s: aiunit game info enter suc.\n", __func__);
+		} else {
+			TPD_INFO("%s: aiunit game info enter fail.\n", __func__);
+		}
+	} else {
+		ret = syna_tcm_set_dynamic_config(tcm_hcd, SYNA_CMD_GAME_AIUINIT_EN, 0);
+		msleep(3);
+		ret = syna_tcm_get_dynamic_config(tcm_hcd, SYNA_CMD_GAME_AIUINIT_EN, &regval);
+		if (regval == 0) {
+			TPD_INFO("%s: aiunit game info exit suc.\n", __func__);
+		} else {
+			TPD_INFO("%s: aiunit game info exit fail.\n", __func__);
+		}
+	}
+
+	cmd[0] = SYNA_CMD_GAME_AIUINIT;
+	for (i = 0; i < MAX_AIUNIT_SET_NUM; i++) {
+		cmd[10 * i + 1] = ts->tp_ic_aiunit_game_info[i].gametype;
+		cmd[10 * i + 2] = ts->tp_ic_aiunit_game_info[i].aiunit_game_type;
+		cmd[10 * i + 3] = ts->tp_ic_aiunit_game_info[i].left & 0xff;
+		cmd[10 * i + 4] = (ts->tp_ic_aiunit_game_info[i].left >> 8) & 0xff;
+		cmd[10 * i + 5] = ts->tp_ic_aiunit_game_info[i].top & 0xff;
+		cmd[10 * i + 6] = (ts->tp_ic_aiunit_game_info[i].top >> 8) & 0xff;
+		cmd[10 * i + 7] = ts->tp_ic_aiunit_game_info[i].right & 0xff;
+		cmd[10 * i + 8] = (ts->tp_ic_aiunit_game_info[i].right >> 8) & 0xff;
+		cmd[10 * i + 9] = ts->tp_ic_aiunit_game_info[i].bottom & 0xff;
+		cmd[10 * i + 10] = (ts->tp_ic_aiunit_game_info[i].bottom >> 8) & 0xff;
+		TPD_INFO("type:%x,%x left:%x,%x top:%x,%x right:%x,%x bottom:%x,%x.", \
+				cmd[10 * i + 1], cmd[10 * i + 2], \
+				cmd[10 * i + 3], cmd[10 * i + 4], \
+				cmd[10 * i + 5], cmd[10 * i + 6], \
+				cmd[10 * i + 7], cmd[10 * i + 8], \
+				cmd[10 * i + 9], cmd[10 * i + 10]);
+	}
+
+	ret = syna_tcm_set_long_config(tcm_hcd, cmd);
+	if (ret < 0) {
+		TPD_INFO("fts tp aiunit game write fail");
+	}
+}
+
 static struct oplus_touchpanel_operations syna_tcm_ops = {
 	.ftm_process       = syna_ftm_process,
 	.get_vendor        = syna_get_vendor,
@@ -5365,6 +5470,7 @@ static struct oplus_touchpanel_operations syna_tcm_ops = {
 	.get_glove_mode         = syna_getglove_mode_status,
 	.tp_irq_control  = syna_tp_irq_control,
 	.diaphragm_touch_lv_set    = syna_tcm_diaphragm_touch_lv_set,
+	.aiunit_game_info       = syna_aiunit_game_info,
 };
 
 /*

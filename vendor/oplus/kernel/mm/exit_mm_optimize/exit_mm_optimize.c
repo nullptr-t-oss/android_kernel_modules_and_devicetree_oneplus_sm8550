@@ -376,9 +376,8 @@ static ssize_t oplus_memcg_name_ops_write(struct file *file, const char __user *
 	while ((token = strsep(&str, delimiters)) != NULL) {
 		struct memcg_array_entry *memcg_check_entry = kmalloc(sizeof(struct memcg_array_entry), GFP_KERNEL);
 		if (memcg_check_entry) {
-			int len = strlen(token);
 			memset(memcg_check_entry, 0, sizeof(struct memcg_array_entry));
-			strncpy(memcg_check_entry->name, token, len);
+			strncpy(memcg_check_entry->name, token, MAX_BUF_LEN-1);
 			list_add(&memcg_check_entry->list, &memcg_check_list);
 		}
 	}

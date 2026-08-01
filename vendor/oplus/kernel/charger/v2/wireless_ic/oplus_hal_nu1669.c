@@ -38,6 +38,7 @@
 #endif
 
 #define LDO_ON_MA	100
+#define NU1669_AC_OV_FLAG	1  /*This IC has an AC_OV issue when used with the 0x0001 in-vehicle unit*/
 
 enum {
 	TX_STATUS_OFF,
@@ -2380,6 +2381,18 @@ static int nu1669_set_silent(struct oplus_chg_ic_dev *dev)
 	return 0;
 }
 
+static int nu1669_get_ac_ov_flag(struct oplus_chg_ic_dev *dev, int *ac_ov_flag)
+{
+	if (dev == NULL || ac_ov_flag == NULL) {
+		chg_err("oplus_chg_ic_dev or ac_ov_flag is NULL\n");
+		return -ENODEV;
+	}
+	*ac_ov_flag = NU1669_AC_OV_FLAG;
+
+	return 0;
+}
+
+
 static bool nu1669_vac_acdrv_check(struct oplus_nu1669 *chip)
 {
 	int rc;
@@ -2955,6 +2968,10 @@ static void *oplus_chg_rx_get_func(struct oplus_chg_ic_dev *ic_dev,
 	case OPLUS_IC_FUNC_RX_SEND_EPP_MATCH_Q:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_RX_SEND_EPP_MATCH_Q,
 			nu1669_epp_send_match_q);
+		break;
+	case OPLUS_IC_FUNC_RX_GET_AC_OV_FLAG:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_RX_GET_AC_OV_FLAG,
+			nu1669_get_ac_ov_flag);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);

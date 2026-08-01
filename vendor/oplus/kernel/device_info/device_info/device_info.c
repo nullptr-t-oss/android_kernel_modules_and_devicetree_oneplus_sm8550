@@ -242,6 +242,9 @@ static int devinfo_read_emmc_func(struct seq_file *s, void *v)
 	case 0xab:
 		manufacture = "BIWIN";
 		break;
+	case 0x86:
+		manufacture = "XBSTOR";
+		break;
 	default:
 		printk("%s unknown mmc->card->cid.manfid is %x\n", __func__, mmc->card->cid.manfid);
 		manufacture = "Unknown";

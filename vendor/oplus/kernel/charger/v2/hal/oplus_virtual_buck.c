@@ -4204,6 +4204,62 @@ static int oplus_chg_vb_get_batt_btb_temp(struct oplus_chg_ic_dev *ic_dev,
 	return rc;
 }
 
+static int oplus_chg_vb_get_shaft_btb_temp(struct oplus_chg_ic_dev *ic_dev,
+					  int *shaft_btb_tbat)
+{
+	struct oplus_virtual_buck_ic *vb;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	vb = oplus_chg_ic_get_drvdata(ic_dev);
+
+	for (i = 0; i < vb->child_num; i++) {
+		if (!func_is_support(&vb->child_list[i], OPLUS_IC_FUNC_BUCK_GET_SHAFT_BATT_BTB_TEMP)) {
+			rc = -ENOTSUPP;
+			continue;
+		}
+		rc = oplus_chg_ic_func(vb->child_list[i].ic_dev, OPLUS_IC_FUNC_BUCK_GET_SHAFT_BATT_BTB_TEMP, shaft_btb_tbat);
+		if (rc < 0)
+			chg_err("child ic[%d] can't get shaft btb status, rc=%d\n", i, rc);
+		break;
+	}
+
+	return rc;
+}
+
+int oplus_chg_vb_set_shfat_btb_over_status(struct oplus_chg_ic_dev *ic_dev, bool is_shaft_btb_over)
+{
+	struct oplus_virtual_buck_ic *vb;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	vb = oplus_chg_ic_get_drvdata(ic_dev);
+
+	for (i = 0; i < vb->child_num; i++) {
+		if (!func_is_support(&vb->child_list[i], OPLUS_IC_FUNC_BUCK_PUSH_SHAFT_BATT_BTB_OVER)) {
+			rc = -ENOTSUPP;
+			continue;
+		}
+		rc = oplus_chg_ic_func(vb->child_list[i].ic_dev, OPLUS_IC_FUNC_BUCK_PUSH_SHAFT_BATT_BTB_OVER,
+			is_shaft_btb_over);
+		if (rc < 0) {
+			chg_err("child ic[%d] set shfat btb status error, rc=%d\n", i, rc);
+			return rc;
+		}
+	}
+
+	return 0;
+}
+
 static int oplus_chg_vb_get_fv(struct oplus_chg_ic_dev *ic_dev,
 					  int *fv_ma)
 {
@@ -5294,6 +5350,14 @@ static void *oplus_chg_vb_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_c
 		break;
 	case OPLUS_IC_FUNC_BUCK_ITEM_CHECK:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_ITEM_CHECK, oplus_chg_vb_iterm_check);
+		break;
+	case OPLUS_IC_FUNC_BUCK_GET_SHAFT_BATT_BTB_TEMP:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_GET_SHAFT_BATT_BTB_TEMP,
+					       oplus_chg_vb_get_shaft_btb_temp);
+		break;
+	case OPLUS_IC_FUNC_BUCK_PUSH_SHAFT_BATT_BTB_OVER:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_PUSH_SHAFT_BATT_BTB_OVER,
+					       oplus_chg_vb_set_shfat_btb_over_status);
 		break;
 	case OPLUS_IC_FUNC_BUCK_GET_POWER_ROLE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_GET_POWER_ROLE, oplus_chg_vb_get_power_role);

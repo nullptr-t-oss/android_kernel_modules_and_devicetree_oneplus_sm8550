@@ -1192,6 +1192,7 @@ struct touchpanel_data {
 	bool pen_support_opp;                               /*support pen private protocol*/
 	bool bus_ready_check_support;                       /*not transfer if bus_ready false*/
 	bool tp_lcd_suspend_in_lp_support;                  /*tp suspend before lcd set lp(aod) mode*/
+	bool ili_use_new_driver_version;                    /*use new driver version*/
 	bool is_pen_attracted;                              /*state of pen attract*/
 	bool is_pen_connected;                              /*state of pen connect*/
 	struct pen_config		pen_config;

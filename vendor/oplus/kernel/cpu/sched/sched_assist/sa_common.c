@@ -67,6 +67,10 @@
 #endif
 
 #include "sa_exec.h"
+#include <trace/hooks/block.h>
+#ifndef BLOCK_TEST_UX_MAGIC
+#define BLOCK_TEST_UX_MAGIC (0x02)
+#endif
 
 #define CREATE_TRACE_POINTS
 #include "trace_sched_assist.h"
@@ -1394,7 +1398,7 @@ void clear_all_inherit_type(struct task_struct *p)
 int get_max_inherit_gran(struct task_struct *p)
 {
 	if (global_lowend_plat_opt && test_inherit_ux(p, INHERIT_UX_BINDER))
-		return MAX_INHERIT_GRAN * 2;
+		return MAX_INHERIT_GRAN * 6;
 
 	return MAX_INHERIT_GRAN;
 }
@@ -1978,6 +1982,10 @@ void android_vh_reweight_entity_handler(void *unused, struct sched_entity *se)
 
 void android_vh_blk_rq_ctx_init_handler(void *unused, struct request *rq, struct blk_mq_tags *tags, struct blk_mq_alloc_data *data, u64 alloc_time_ns)
 {
+	if (alloc_time_ns == BLOCK_TEST_UX_MAGIC && test_task_ux((struct task_struct *)rq)) {
+		* (bool *)tags = true;
+		return;
+	}
 	if (test_task_ux(current) && (IOPRIO_PRIO_CLASS(rq->ioprio) != IOPRIO_CLASS_RT)) {
 		rq->ioprio =  IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 4);
 	}

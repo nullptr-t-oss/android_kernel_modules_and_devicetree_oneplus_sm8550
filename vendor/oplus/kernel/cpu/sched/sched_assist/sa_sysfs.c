@@ -436,30 +436,39 @@ static ssize_t proc_ux_task_write(struct file *file, const char __user *buf,
 			rcu_read_unlock();
 
 			if (ux_task) {
+				int ux_original;
+				bool need_update = true;
+
 				if (im_mali(ux_task->comm)) {
 					put_task_struct(ux_task);
 					mutex_unlock(&sa_ux_mutex);
 					return -EFAULT;
 				}
 				ux_orig = oplus_get_static_ux_state(ux_task);
+				ux_original = ux_orig;
 
 				if (ux_state == SA_OPT_CLEAR) { /* clear all ux type but animator type */
 					if (ux_orig & SA_TYPE_ANIMATOR)
 						ux_orig &= SA_TYPE_ANIMATOR;
 					else
 						ux_orig = 0;
-					oplus_set_ux_state_lock(ux_task, ux_orig, -1, true);
 				} else if (ux_state & SA_OPT_SET) { /* set target ux type and clear set opt */
 					if (ux_state & SA_OPT_SET_PRIORITY) {
 						ux_orig &= ~(SCHED_ASSIST_UX_PRIORITY_MASK);
 					}
 					ux_orig |= ux_state & ~(SA_OPT_SET|SA_OPT_SET_PRIORITY);
-					oplus_set_ux_state_lock(ux_task, ux_orig, -1, true);
 				} else if (ux_orig & ux_state) { /* reset target ux type */
 					ux_orig &= ~ux_state;
+				} else {
+					need_update = false;
+				}
+				if (need_update) {
+					/* only audio itself can clean swift type */
+					if (ux_original & SA_TYPE_SWIFT) {
+						ux_orig |= SA_TYPE_SWIFT;
+					}
 					oplus_set_ux_state_lock(ux_task, ux_orig, -1, true);
 				}
-
 				put_task_struct(ux_task);
 			}
 		}
@@ -596,6 +605,7 @@ long write_task_ux(pid_t pid, pid_t tid, int ux_value, bool fromSysOrApp) {
 	if (ux_task) {
 		bool need_update = true;
 		int ux_state = -1;
+		int ux_original = ux_orig;
 
 		if (im_mali(ux_task->comm)) {
 			put_task_struct(ux_task);
@@ -650,6 +660,10 @@ long write_task_ux(pid_t pid, pid_t tid, int ux_value, bool fromSysOrApp) {
 		}
 
 		if (need_update) {
+			/* only audio itself can clean swift type */
+			if (ux_original & SA_TYPE_SWIFT) {
+				ux_state |= SA_TYPE_SWIFT;
+			}
 			oplus_set_ux_state_lock(ux_task, ux_state, -1, true);
 		}
 

@@ -655,7 +655,7 @@ retry:
 
 		/* fit status to check if taks util fits cpu capacity */
 		if (global_lowend_plat_opt && global_less_prime_cpu_arch) {
-			if (cls_nr == 0 && (!fits_capacity(oplus_task_util(task), ux_cputopo.sched_cls[0].capacity) || ux_cls_boost))
+			if (cls_nr == 0 && ((oplus_task_util(task) > (ux_cputopo.sched_cls[1].capacity >> 1)) || ux_cls_boost))
 				break;
 		} else {
 			if (cls_nr == 0 && (!task_fits_max(task, cpu) || ux_cls_boost))

@@ -651,7 +651,7 @@ static ssize_t proc_gesture_control_write(struct file *file,
 				ts->ts_ops->enable_gesture_mask(ts->chip_data,
 								(ts->gesture_enable & 0x01) == 1);
 
-			} else if (!ts->aod_gesture_support) {
+			} else {
 				operate_mode_switch(ts);
 			}
 		}
@@ -4420,11 +4420,6 @@ static ssize_t proc_rainstorm_mode_write(struct file *file, const char __user *b
 	}
 
 	mutex_lock(&ts->mutex);
-	if (ts->is_suspended) {
-		TS_TP_INFO("%s: is_suspended, exit\n", __func__);
-		mutex_unlock(&ts->mutex);
-		return count;
-	}
 
 	ts->rainstorm_enable = !!value;
 
@@ -4921,7 +4916,7 @@ int init_touchpanel_proc_part2(struct touchpanel_data *ts, struct proc_dir_entry
 		},
 		{
 			"disable_touch_event", 0666, NULL, &proc_disable_touch_event_fops, ts, false,
-			ts->disable_touch_event_support
+			true
 		},
 		{
 			"wireless_charge_detect", 0666, NULL, &proc_wireless_charge_detect_fops, ts, false,
