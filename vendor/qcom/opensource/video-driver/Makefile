@@ -2,6 +2,7 @@
 
 VIDEO_ROOT = $(KERNEL_SRC)/$(M)
 KBUILD_OPTIONS+= VIDEO_ROOT=$(VIDEO_ROOT)
+KBUILD_OPTIONS+= KBUILD_EXTRA_SYMBOLS=$(M)/../mmrm-driver/Module.symvers
 
 VIDEO_COMPILE_TIME = $(shell date)
 VIDEO_COMPILE_BY = $(shell whoami | sed 's/\\/\\\\/')
