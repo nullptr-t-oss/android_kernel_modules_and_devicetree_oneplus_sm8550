@@ -13587,10 +13587,10 @@ static int hdd_monitor_wext_giwfreq(struct net_device *dev,
 
 	ret = hdd_validate_adapter(adapter);
 	if (ret || adapter->device_mode != QDF_MONITOR_MODE ||
-	    !adapter->deflink)
+	    !adapter)
 		return -EINVAL;
 
-	mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter->deflink);
+	mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter);
 	if (!mon_ctx->freq)
 		return -ENODATA;
 

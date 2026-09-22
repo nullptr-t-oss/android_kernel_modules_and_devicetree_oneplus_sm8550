@@ -25875,7 +25875,7 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 
 	/* Keep queued injection frames out of the old channel transition. */
 	status = wma_injection_channel_change_begin(
-			adapter->deflink->vdev_id,
+			adapter->vdev_id,
 			chandef->chan->center_freq);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_warn("failed to quiesce monitor injection: %d", status);
@@ -25923,7 +25923,7 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 	/* Helper vdev setup rewrites the shared RXDMA ring selection. */
 	status = cdp_refresh_monitor_mode(
 			cds_get_context(QDF_MODULE_ID_SOC), OL_TXRX_PDEV_ID,
-			adapter->deflink->vdev_id);
+			adapter->vdev_id);
 	if (QDF_IS_STATUS_ERROR(status))
 		hdd_warn("failed to restore monitor RX filters: %d", status);
 	else
@@ -26954,6 +26954,65 @@ bool hdd_is_legacy_connection(struct hdd_adapter *adapter)
 }
 
 #ifdef FEATURE_MONITOR_MODE_SUPPORT
+static void
+wlan_hdd_update_chandef(struct cfg80211_chan_def *chandef,
+			enum phy_ch_width ch_width, uint32_t ch_cfreq2,
+			bool is_legacy_phymode)
+{
+	switch (ch_width) {
+	case CH_WIDTH_20MHZ:
+		if (is_legacy_phymode)
+			chandef->width = NL80211_CHAN_WIDTH_20_NOHT;
+		else
+			chandef->width = NL80211_CHAN_WIDTH_20;
+		break;
+	case CH_WIDTH_40MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_40;
+		break;
+	case CH_WIDTH_80MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_80;
+		break;
+	case CH_WIDTH_160MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_160;
+		/* Set center_freq1 to center frequency of complete 160MHz */
+		chandef->center_freq1 = ch_cfreq2;
+		break;
+	case CH_WIDTH_80P80MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_80P80;
+		chandef->center_freq2 = ch_cfreq2;
+		break;
+	case CH_WIDTH_5MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_5;
+		break;
+	case CH_WIDTH_10MHZ:
+		chandef->width = NL80211_CHAN_WIDTH_10;
+		break;
+	default:
+		chandef->width = NL80211_CHAN_WIDTH_20;
+		break;
+	}
+}
+
+#if defined(WLAN_FEATURE_11BE) && defined(CFG80211_11BE_BASIC)
+static void wlan_hdd_set_chandef_for_11be(struct cfg80211_chan_def *chandef,
+					  struct wlan_channel *chan_info)
+{
+	if (chan_info->ch_width != CH_WIDTH_320MHZ)
+		return;
+
+	chandef->width = NL80211_CHAN_WIDTH_320;
+	/* Set center_freq1 to center frequency of complete 320MHz */
+	chandef->center_freq1 = chan_info->ch_cfreq2;
+}
+
+#else /* !WLAN_FEATURE_11BE */
+static inline void
+wlan_hdd_set_chandef_for_11be(struct cfg80211_chan_def *chandef,
+			      struct wlan_channel *chan_info)
+{
+}
+#endif /* WLAN_FEATURE_11BE */
+
 static int
 wlan_hdd_cfg80211_get_channel_mon(struct wiphy *wiphy,
 				  struct cfg80211_chan_def *chandef,
@@ -26964,7 +27023,7 @@ wlan_hdd_cfg80211_get_channel_mon(struct wiphy *wiphy,
 	struct wlan_channel chan_info = {0};
 	struct wlan_channel *des_chan;
 
-	vdev = hdd_objmgr_get_vdev_by_user(adapter->deflink, WLAN_OSIF_ID);
+	vdev = hdd_objmgr_get_vdev_by_user(adapter, WLAN_OSIF_ID);
 	if (vdev) {
 		des_chan = wlan_vdev_mlme_get_des_chan(vdev);
 		if (des_chan && des_chan->ch_freq)
@@ -26974,7 +27033,7 @@ wlan_hdd_cfg80211_get_channel_mon(struct wiphy *wiphy,
 
 	/* The monitor context is updated by set_monitor_channel first. */
 	if (!chan_info.ch_freq) {
-		mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter->deflink);
+		mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter);
 		chan_info.ch_freq = mon_ctx->freq;
 		chan_info.ch_cfreq1 = mon_ctx->freq;
 		chan_info.ch_width = mon_ctx->bandwidth;

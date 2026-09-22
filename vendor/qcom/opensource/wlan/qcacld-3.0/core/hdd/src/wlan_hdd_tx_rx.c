@@ -612,7 +612,7 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 {
 	QDF_STATUS status;
 
-	if (!adapter || !adapter->deflink) {
+	if (!adapter) {
 		kfree_skb(skb);
 		return;
 	}
@@ -637,10 +637,10 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
 	qdf_nbuf_reset_ctxt((qdf_nbuf_t)skb);
 
 	status = wma_injection_tx((qdf_nbuf_t)skb,
-				  adapter->deflink->vdev_id);
+				  adapter->vdev_id);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_dp_warn_rl("monitor tx: injection failed vdev %u status %d",
-			       adapter->deflink->vdev_id, status);
+			       adapter->vdev_id, status);
 		kfree_skb(skb);
 		return;
 	}

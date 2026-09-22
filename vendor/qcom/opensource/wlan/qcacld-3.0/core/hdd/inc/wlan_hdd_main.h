@@ -858,6 +858,20 @@ struct hdd_ap_ctx {
 };
 
 /**
+ * struct hdd_monitor_ctx - Monitor specific information
+ * @freq: Monitor Frequency
+ * @bandwidth: Monitor bandwidth
+ * @cb_mode: Channel bonding
+ * @phy_mode: PHY mode
+ */
+struct hdd_monitor_ctx {
+	qdf_freq_t freq;
+	enum phy_ch_width bandwidth;
+	uint8_t cb_mode;
+	eCsrPhyMode phy_mode;
+};
+
+/**
  * struct hdd_scan_info - Per-adapter scan information
  * @scan_add_ie: Additional IE for scan
  * @default_scan_ies: Default scan IEs
@@ -1233,6 +1247,7 @@ struct hdd_adapter {
 	union {
 		struct hdd_station_ctx station;
 		struct hdd_ap_ctx ap;
+		struct hdd_monitor_ctx monitor;
 	} session;
 
 	qdf_atomic_t ch_switch_in_progress;
@@ -1373,6 +1388,7 @@ struct hdd_adapter {
 
 #define WLAN_HDD_GET_STATION_CTX_PTR(adapter) (&(adapter)->session.station)
 #define WLAN_HDD_GET_AP_CTX_PTR(adapter) (&(adapter)->session.ap)
+#define WLAN_HDD_GET_MONITOR_CTX_PTR(adapter) (&(adapter)->session.monitor)
 #define WLAN_HDD_GET_CTX(adapter) ((adapter)->hdd_ctx)
 #define WLAN_HDD_GET_HOSTAP_STATE_PTR(adapter) \
 				(&(adapter)->session.ap.hostapd_state)
