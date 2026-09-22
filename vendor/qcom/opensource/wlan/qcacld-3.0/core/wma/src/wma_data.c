@@ -289,7 +289,7 @@ static void __wma_injection_destroy_helper(tp_wma_handle wma)
 	}
 	if (helper->wmi_started) {
 		vdev_stop.vdev_id = helper->vdev_id;
-		wmi_unified_vdev_stop_send(wma->wmi_handle, &vdev_stop);
+		wmi_unified_vdev_stop_send(wma->wmi_handle, vdev_stop.vdev_id);
 		helper->wmi_started = false;
 		msleep(50);
 	}
