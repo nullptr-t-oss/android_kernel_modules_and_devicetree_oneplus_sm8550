@@ -9814,12 +9814,12 @@ static int hdd_wext_giwfreq(struct net_device *dev,
 
 	switch (adapter->device_mode) {
 	case QDF_MONITOR_MODE:
-		mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter->deflink);
+		mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter);
 		chan_freq = mon_ctx->freq;
 		break;
 	case QDF_STA_MODE:
 	case QDF_P2P_CLIENT_MODE:
-		sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter->deflink);
+		sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
 		chan_freq = sta_ctx->conn_info.chan_freq;
 		break;
 	default:
