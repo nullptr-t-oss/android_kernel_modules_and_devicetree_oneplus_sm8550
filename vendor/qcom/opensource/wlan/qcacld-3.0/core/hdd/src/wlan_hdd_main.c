@@ -6989,6 +6989,76 @@ hdd_vdev_destroy_procedure:
 	return errno;
 }
 
+#if defined(CONFIG_WIRELESS_EXT) && defined(FEATURE_FRAME_INJECTION_SUPPORT)
+static int hdd_monitor_wext_giwname(struct net_device *dev,
+				    struct iw_request_info *info,
+				    union iwreq_data *wrqu, char *extra)
+{
+	strscpy(wrqu->name, "IEEE 802.11", IFNAMSIZ);
+
+	return 0;
+}
+
+static int hdd_monitor_wext_giwmode(struct net_device *dev,
+				    struct iw_request_info *info,
+				    union iwreq_data *wrqu, char *extra)
+{
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	int ret;
+
+	ret = hdd_validate_adapter(adapter);
+	if (ret)
+		return -EINVAL;
+
+	wrqu->mode = adapter->device_mode == QDF_MONITOR_MODE ?
+		IW_MODE_MONITOR : IW_MODE_INFRA;
+	return 0;
+}
+
+static int hdd_monitor_wext_giwfreq(struct net_device *dev,
+				    struct iw_request_info *info,
+				    union iwreq_data *wrqu, char *extra)
+{
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	struct hdd_monitor_ctx *mon_ctx;
+	int ret;
+
+	ret = hdd_validate_adapter(adapter);
+	if (ret || adapter->device_mode != QDF_MONITOR_MODE ||
+	    !adapter)
+		return -EINVAL;
+
+	mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter);
+	if (!mon_ctx->freq)
+		return -ENODATA;
+
+	wrqu->freq.m = mon_ctx->freq;
+	wrqu->freq.e = 6;
+
+	return 0;
+}
+
+static const iw_handler hdd_monitor_wext_handlers[] = {
+	[IW_IOCTL_IDX(SIOCGIWNAME)] = hdd_monitor_wext_giwname,
+	[IW_IOCTL_IDX(SIOCGIWFREQ)] = hdd_monitor_wext_giwfreq,
+	[IW_IOCTL_IDX(SIOCGIWMODE)] = hdd_monitor_wext_giwmode,
+};
+
+static const struct iw_handler_def hdd_monitor_wext_handler_def = {
+	.num_standard = QDF_ARRAY_SIZE(hdd_monitor_wext_handlers),
+	.standard = hdd_monitor_wext_handlers,
+};
+
+static void hdd_register_monitor_wext(struct net_device *dev)
+{
+	dev->wireless_handlers = &hdd_monitor_wext_handler_def;
+}
+#else
+static inline void hdd_register_monitor_wext(struct net_device *dev)
+{
+}
+#endif
+
 QDF_STATUS hdd_init_station_mode(struct hdd_adapter *adapter)
 {
 	struct hdd_station_ctx *sta_ctx = &adapter->session.station;
@@ -13550,76 +13620,6 @@ hdd_adapter_set_wlm_client_latency_level(struct hdd_adapter *adapter)
 out:
 	hdd_debug("wlm initial mode %u", adapter->latency_level);
 }
-
-#if defined(CONFIG_WIRELESS_EXT) && defined(FEATURE_FRAME_INJECTION_SUPPORT)
-static int hdd_monitor_wext_giwname(struct net_device *dev,
-				    struct iw_request_info *info,
-				    union iwreq_data *wrqu, char *extra)
-{
-	strscpy(wrqu->name, "IEEE 802.11", IFNAMSIZ);
-
-	return 0;
-}
-
-static int hdd_monitor_wext_giwmode(struct net_device *dev,
-				    struct iw_request_info *info,
-				    union iwreq_data *wrqu, char *extra)
-{
-	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
-	int ret;
-
-	ret = hdd_validate_adapter(adapter);
-	if (ret)
-		return -EINVAL;
-
-	wrqu->mode = adapter->device_mode == QDF_MONITOR_MODE ?
-		IW_MODE_MONITOR : IW_MODE_INFRA;
-	return 0;
-}
-
-static int hdd_monitor_wext_giwfreq(struct net_device *dev,
-				    struct iw_request_info *info,
-				    union iwreq_data *wrqu, char *extra)
-{
-	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
-	struct hdd_monitor_ctx *mon_ctx;
-	int ret;
-
-	ret = hdd_validate_adapter(adapter);
-	if (ret || adapter->device_mode != QDF_MONITOR_MODE ||
-	    !adapter)
-		return -EINVAL;
-
-	mon_ctx = WLAN_HDD_GET_MONITOR_CTX_PTR(adapter);
-	if (!mon_ctx->freq)
-		return -ENODATA;
-
-	wrqu->freq.m = mon_ctx->freq;
-	wrqu->freq.e = 6;
-
-	return 0;
-}
-
-static const iw_handler hdd_monitor_wext_handlers[] = {
-	[IW_IOCTL_IDX(SIOCGIWNAME)] = hdd_monitor_wext_giwname,
-	[IW_IOCTL_IDX(SIOCGIWFREQ)] = hdd_monitor_wext_giwfreq,
-	[IW_IOCTL_IDX(SIOCGIWMODE)] = hdd_monitor_wext_giwmode,
-};
-
-static const struct iw_handler_def hdd_monitor_wext_handler_def = {
-	.num_standard = QDF_ARRAY_SIZE(hdd_monitor_wext_handlers),
-	.standard = hdd_monitor_wext_handlers,
-};
-
-static void hdd_register_monitor_wext(struct net_device *dev)
-{
-	dev->wireless_handlers = &hdd_monitor_wext_handler_def;
-}
-#else
-static inline void hdd_register_monitor_wext(struct net_device *dev)
-{
-}
-#endif
 
 /**
  * hdd_start_station_adapter()- Start the Station Adapter
