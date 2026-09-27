@@ -43,10 +43,12 @@
 /*-*************************************
 *  shared macros
 ***************************************/
-#undef MIN
-#undef MAX
+#ifndef MIN
 #define MIN(a,b) ((a)<(b) ? (a) : (b))
+#endif
+#ifndef MAX
 #define MAX(a,b) ((a)>(b) ? (a) : (b))
+#endif
 
 /*
  * Ignore: this is an internal helper.
