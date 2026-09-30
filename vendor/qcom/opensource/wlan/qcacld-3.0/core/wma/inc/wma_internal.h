@@ -1807,6 +1807,11 @@ uint16_t wma_mcs_rate_match(uint16_t raw_rate, bool is_he,
 			    const uint16_t *nss1_rate,
 			    const uint16_t *nss2_rate,
 			    uint8_t *nss, enum txrate_gi *guard_interval);
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+//add for connectivity power monitor
+int oplusLpmUeventInit(void);
+void oplusConnUeventDeinit(void);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 
 /**
  * wma_update_edca_pifs_param() - Update edca/pifs param

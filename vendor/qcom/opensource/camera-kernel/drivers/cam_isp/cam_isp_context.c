@@ -1349,7 +1349,9 @@ static void __cam_isp_ctx_send_unified_timestamp(
 	req_msg.u.frame_msg_v2.timestamps[CAM_REQ_BOOT_TIMESTAMP] = ctx_isp->boot_timestamp;
 	req_msg.u.frame_msg_v2.link_hdl = ctx_isp->base->link_hdl;
 	req_msg.u.frame_msg_v2.frame_id_meta = ctx_isp->frame_id_meta;
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	req_msg.reserved = 0;
+#endif
 	CAM_DBG(CAM_ISP,
 		"link hdl 0x%x request id:%lld frame number:%lld SOF time stamp:0x%llx ctx %d\
 		boot time stamp:0x%llx", ctx_isp->base->link_hdl, request_id,
@@ -1413,7 +1415,7 @@ static void __cam_isp_ctx_send_sof_timestamp(
 
 	if (request_id == 0 && (ctx_isp->reported_frame_id == ctx_isp->frame_id)) {
 		CAM_WARN_RATE_LIMIT(CAM_ISP,
-			"Missed SOF Recovery for invalid req, Skip notificaiton to userspace Ctx: %u frame_id %u",
+			"Missed SOF Recovery for invalid req, Skip notificaiton to userspace Ctx: %u frame_id %llu",
 			ctx->ctx_id, ctx_isp->frame_id);
 		return;
 	}
@@ -2767,6 +2769,9 @@ static int __cam_isp_ctx_notify_sof_in_activated_state(
 	uint64_t last_cdm_done_req = 0;
 	struct cam_isp_hw_epoch_event_data *epoch_done_event_data =
 			(struct cam_isp_hw_epoch_event_data *)evt_data;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	char trace[64] = {0};
+#endif
 
 	if (!evt_data) {
 		CAM_ERR(CAM_ISP, "invalid event data");
@@ -2873,9 +2878,18 @@ notify_only:
 			}
 		}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		if (ctx_isp->substate_activated == CAM_ISP_CTX_ACTIVATED_BUBBLE) {
+			request_id = 0;
+			memset(trace, 0, sizeof(trace));
+			snprintf(trace, sizeof(trace), "KMD %d_4 Skip Frame", ctx->link_hdl);
+			trace_int(trace, 0);
+			trace_begin_end("Req[%lld] CAM_ISP_CTX_ACTIVATED_BUBBLE", req->request_id);
+		}
+#else
 		if (ctx_isp->substate_activated == CAM_ISP_CTX_ACTIVATED_BUBBLE)
 			request_id = 0;
-
+#endif
 		if (request_id != 0)
 			ctx_isp->reported_req_id = request_id;
 

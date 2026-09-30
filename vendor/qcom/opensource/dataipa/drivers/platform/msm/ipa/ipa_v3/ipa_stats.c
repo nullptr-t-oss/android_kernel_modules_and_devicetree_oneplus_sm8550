@@ -280,7 +280,6 @@ static int ipa_get_generic_stats(unsigned long arg)
 				uint64_t)holb_mon_stats_ptr + sizeof(struct holb_monitor_stats));
 		}
 	}
-
 	if(copy_to_user((void __user *)arg,
 		(u8 *)generic_stats,
 		alloc_size)) {

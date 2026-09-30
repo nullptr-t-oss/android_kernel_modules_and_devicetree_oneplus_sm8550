@@ -4057,7 +4057,6 @@ irqreturn_t cam_tfe_csid_irq(int irq_num, void *data)
 		if (irq_status[TFE_CSID_IRQ_REG_RX] &
 			TFE_CSID_CSI2_RX_ERROR_MMAPPED_VC_DT)
 			is_error_irq = true;
-
 	}
 handle_fatal_error:
 	spin_unlock_irqrestore(&csid_hw->spin_lock, flags);
@@ -4079,7 +4078,6 @@ handle_fatal_error:
 			csid_reg->csi2_reg->csid_csi2_rx_cfg1_addr);
 		cam_io_w_mb(0, soc_info->reg_map[0].mem_base +
 			csid_reg->csi2_reg->csid_csi2_rx_irq_mask_addr);
-
 		report_err_type = CAM_ISP_HW_ERROR_CSID_FATAL;
 		cam_tfe_csid_handle_hw_err_irq(csid_hw,
 			report_err_type, irq_status);

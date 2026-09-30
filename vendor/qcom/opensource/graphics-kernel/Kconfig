@@ -124,3 +124,8 @@ config QCOM_KGSL_HIBERNATION
 	  Say 'Y' to enable hibernation support in kgsl. If enabled, kgsl
 	  will register necessary power manager callbacks to support
 	  hibernation.
+
+config OPLUS_SYNC_FENCE
+	bool "Enable oplus sync fence"
+	help
+	  Enable sync_fence driver

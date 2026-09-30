@@ -22,6 +22,20 @@
 #include "dsi_pwr.h"
 #include "dsi_parser.h"
 #include "msm_drv.h"
+#ifdef OPLUS_FEATURE_DISPLAY
+#include "../oplus/oplus_dsi_support.h"
+#include <linux/soc/qcom/panel_event_notifier.h>
+
+struct oplus_brightness_alpha {
+	u32 brightness;
+	u32 alpha;
+};
+
+struct oplus_clk_osc {
+	u32 clk_rate;
+	u32 osc_rate;
+};
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 #define MAX_BL_LEVEL 4096
 #define MAX_BL_SCALE_LEVEL 1024
@@ -114,6 +128,11 @@ struct dsi_pinctrl_info {
 	struct pinctrl_state *active;
 	struct pinctrl_state *suspend;
 	struct pinctrl_state *pwm_pin;
+#ifdef OPLUS_FEATURE_DISPLAY
+	/* oplus panel pinctrl */
+	struct pinctrl_state *oplus_panel_active;
+	struct pinctrl_state *oplus_panel_suspend;
+#endif /* OPLUS_FEATURE_DISPLAY */
 };
 
 struct dsi_panel_phy_props {
@@ -122,6 +141,96 @@ struct dsi_panel_phy_props {
 	enum dsi_panel_rotation rotation;
 };
 
+#ifdef OPLUS_FEATURE_DISPLAY
+struct dsi_panel_oplus_privite {
+	const char *vendor_name;
+	const char *manufacture_name;
+	bool skip_mipi_last_cmd;
+	bool is_pxlw_iris5;
+	int bl_remap_count;
+	bool is_osc_support;
+	u32 osc_clk_mode0_rate;
+	u32 osc_clk_mode1_rate;
+	bool cabc_enabled;
+	bool dre_enabled;
+	bool aod_backlight_async;
+	bool is_apollo_support;
+	u32 sync_brightness_level;
+	bool dp_support;
+	struct oplus_brightness_alpha *bl_remap;
+	bool dc_apollo_sync_enable;
+	u32 dc_apollo_sync_brightness_level;
+	u32 dc_apollo_sync_brightness_level_pcc;
+	u32 dc_apollo_sync_brightness_level_pcc_min;
+	int iris_pw_enable;
+	int iris_pw_rst_gpio;
+	int iris_pw_0p9_en_gpio;
+	bool pwm_turbo_support;
+	bool pwm_turbo_enabled;
+	bool ffc_enabled;
+	u32 ffc_delay_frames;
+	u32 ffc_mode_count;
+	u32 ffc_mode_index;
+	struct oplus_clk_osc *clk_osc_seq;
+	u32 clk_rate_cur;
+	u32 osc_rate_cur;
+	bool gpio_pre_on;
+	bool pinctrl_enabled;
+	bool pwm_switch_support;
+	bool pwm_onepulse_support;
+	bool pwm_onepulse_enabled;
+	bool directional_onepulse_switch;
+	bool dynamic_demua_support;
+	u32 hbm_max_state;
+	bool cmdq_pack_support;
+	bool cmdq_pack_state;
+	u32 pwm_sw_cmd_te_cnt;
+/********************************************
+	fp_type usage:
+	bit(0):lcd capacitive fingerprint(aod/fod are not supported)
+	bit(1):oled capacitive fingerprint(only support aod)
+	bit(2):optical fingerprint old solution(dim layer and pressed icon are controlled by kernel)
+	bit(3):optical fingerprint new solution(dim layer and pressed icon are not controlled by kernel)
+	bit(4):local hbm
+	bit(5):pressed icon brightness adaptive
+	bit(6):ultrasonic fingerprint
+	bit(7):ultra low power aod
+********************************************/
+	u32 fp_type;
+	bool enhance_mipi_strength;
+	bool oplus_vreg_ctrl_flag;
+	bool oplus_sw_reset_ctrl_flag;
+	bool oplus_disp_hw_seq_modify_flag;
+	bool pwm_create_thread;
+	bool oplus_bl_demura_dbv_support;
+	int bl_demura_mode;
+	bool pwm_switch_restore_support;
+	bool need_sync;
+	u32 disable_delay_bl_count;
+	bool gamma_switch_enable;
+	bool vid_timming_switch_enabled;
+	bool vid_timming_switch_post_enabled;
+	bool dimming_setting_before_bl_0_enable;
+	bool vidmode_backlight_async_wait_enable;
+	bool set_backlight_not_do_esd_reg_read_enable;
+	bool dozedisable_esdcheck_delay;
+	bool doze_disable_esdcheck;
+	/* add for all wait te demand */
+	bool ddic_scaler_need_wait_te;
+};
+
+struct dsi_panel_oplus_serial_number {
+	bool serial_number_support;
+	bool is_reg_lock;
+	bool is_switch_page;
+	u32 serial_number_reg;
+	int serial_number_index;
+	int serial_number_conut;
+	bool is_multi_reg;
+	u32 *serial_number_multi_regs;
+};
+#endif /* OPLUS_FEATURE_DISPLAY */
+
 struct dsi_backlight_config {
 	enum dsi_backlight_type type;
 	enum bl_update_flag bl_update;
@@ -129,9 +238,25 @@ struct dsi_backlight_config {
 	u32 bl_min_level;
 	u32 bl_max_level;
 	u32 brightness_max_level;
+#ifdef OPLUS_FEATURE_DISPLAY
+	u32 bl_normal_max_level;
+	u32 brightness_normal_max_level;
+	u32 brightness_default_level;
+	u32 dc_backlight_threshold;
+	bool oplus_dc_mode;
+	u32 global_hbm_case_id;
+	u32 global_hbm_threshold;
+	bool global_hbm_scale_mapping;
+	u32 pwm_bl_threshold;
+	u32 pwm_bl_onepulse_threshold;
+#endif /* OPLUS_FEATURE_DISPLAY */
+
 	/* current brightness value */
 	u32 brightness;
 	u32 bl_level;
+#ifdef OPLUS_FEATURE_DISPLAY
+	u32 oplus_raw_bl;
+#endif /* OPLUS_FEATURE_DISPLAY */
 	u32 bl_scale;
 	u32 bl_scale_sv;
 	bool bl_inverted_dbv;
@@ -155,6 +280,17 @@ struct dsi_backlight_config {
 	bool lp_mode;
 };
 
+#ifdef OPLUS_FEATURE_DISPLAY
+enum global_hbm_case {
+	GLOBAL_HBM_CASE_NONE,
+	GLOBAL_HBM_CASE_1,
+	GLOBAL_HBM_CASE_2,
+	GLOBAL_HBM_CASE_3,
+	GLOBAL_HBM_CASE_4,
+	GLOBAL_HBM_CASE_MAX
+};
+#endif /* OPLUS_FEATURE_DISPLAY */
+
 struct dsi_reset_seq {
 	u32 level;
 	u32 sleep_ms;
@@ -168,12 +304,20 @@ struct dsi_panel_reset_config {
 	int disp_en_gpio;
 	int lcd_mode_sel_gpio;
 	u32 mode_sel_state;
+#ifdef OPLUS_FEATURE_DISPLAY
+	int panel_vout_gpio;
+	int panel_vddr_aod_en_gpio;
+#endif /* OPLUS_FEATURE_DISPLAY */
 };
 
 enum esd_check_status_mode {
 	ESD_MODE_REG_READ,
 	ESD_MODE_SW_BTA,
 	ESD_MODE_PANEL_TE,
+#ifdef OPLUS_FEATURE_DISPLAY
+	/* add for esd check MIPI ERR flag mode */
+	ESD_MODE_PANEL_MIPI_ERR_FLAG,
+#endif /* OPLUS_FEATURE_DISPLAY */
 	ESD_MODE_SW_SIM_SUCCESS,
 	ESD_MODE_SW_SIM_FAILURE,
 	ESD_MODE_MAX
@@ -190,6 +334,12 @@ struct drm_panel_esd_config {
 	u8 *return_buf;
 	u8 *status_buf;
 	u32 groups;
+#ifdef OPLUS_FEATURE_DISPLAY
+	u32 status_match_modes;
+	bool esd_debug_enabled;
+	/* add for esd check MIPI ERR flag mode, add gpio as irq*/
+	int mipi_err_flag_gpio;
+#endif /* OPLUS_FEATURE_DISPLAY */
 };
 
 struct dsi_panel_spr_info {
@@ -274,6 +424,41 @@ struct dsi_panel {
 	enum dsi_panel_physical_type panel_type;
 
 	struct dsi_panel_ops panel_ops;
+#ifdef OPLUS_FEATURE_DISPLAY
+	bool need_power_on_backlight;
+	struct oplus_brightness_alpha *dc_ba_seq;
+	int dc_ba_count;
+	struct dsi_panel_oplus_privite oplus_priv;
+	struct dsi_panel_oplus_serial_number oplus_ser;
+	int panel_id2;
+	atomic_t esd_pending;
+	atomic_t vidmode_backlight_async_wait;
+	struct mutex panel_tx_lock;
+	struct mutex oplus_ffc_lock;
+	u32 oplus_pwm_switch_state;
+	bool pwm_power_on;
+	bool pwm_hbm_state;
+	ktime_t te_timestamp;
+	/*as the judgment of the first light screen */
+	bool post_power_on;
+	/* for pwm disable duty worker*/
+	struct workqueue_struct *oplus_pwm_disable_duty_set_wq;
+	struct work_struct oplus_pwm_disable_duty_set_work;
+	struct workqueue_struct *oplus_pwm_switch_send_next_cmdq_wq;
+	struct work_struct oplus_pwm_switch_send_next_cmdq_work;
+	ktime_t ts_timestamp;
+	u32 last_us_per_frame;
+	u32 last_vsync_width;
+	u32 last_refresh_rate;
+	u32 work_frame;
+	int power_state;
+#endif /* OPLUS_FEATURE_DISPLAY */
+
+#if defined(CONFIG_PXLW_IRIS)
+	bool is_secondary;
+	int hbm_mode;
+	u32 qsync_mode;
+#endif
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
@@ -410,4 +595,9 @@ int dsi_panel_create_cmd_packets(const char *data, u32 length, u32 count,
 void dsi_panel_destroy_cmd_packets(struct dsi_panel_cmd_set *set);
 
 void dsi_panel_dealloc_cmd_packets(struct dsi_panel_cmd_set *set);
+
+#ifdef OPLUS_FEATURE_DISPLAY
+int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
+		enum dsi_cmd_set_type type);
+#endif /* OPLUS_FEATURE_DISPLAY */
 #endif /* _DSI_PANEL_H_ */

@@ -28,7 +28,6 @@
 #include "common.h"
 bool secure_peripheral_not_found = true;
 
-
 int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 		 uint8_t interface)
 {

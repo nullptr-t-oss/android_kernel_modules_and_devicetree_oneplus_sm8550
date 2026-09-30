@@ -169,7 +169,11 @@ int cam_flash_i2c_power_ops(struct cam_flash_ctrl *fctrl,
 			}
 		}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		rc = cam_sensor_core_power_up(power_info, soc_info, NULL, &(fctrl->io_master_info));
+#else
 		rc = cam_sensor_core_power_up(power_info, soc_info, NULL);
+#endif
 		if (rc) {
 			CAM_ERR(CAM_FLASH, "power up the core is failed:%d",
 				rc);
@@ -179,13 +183,21 @@ int cam_flash_i2c_power_ops(struct cam_flash_ctrl *fctrl,
 		rc = camera_io_init(&(fctrl->io_master_info));
 		if (rc) {
 			CAM_ERR(CAM_FLASH, "cci_init failed: rc: %d", rc);
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			cam_sensor_util_power_down(power_info, soc_info, &(fctrl->io_master_info));
+#else
 			cam_sensor_util_power_down(power_info, soc_info);
+#endif
 			goto free_pwr_settings;
 		}
 		fctrl->is_regulator_enabled = true;
 	} else if ((!regulator_enable) &&
 		(fctrl->is_regulator_enabled == true)) {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		rc = cam_sensor_util_power_down(power_info, soc_info, &(fctrl->io_master_info));
+#else
 		rc = cam_sensor_util_power_down(power_info, soc_info);
+#endif
 		if (rc) {
 			CAM_ERR(CAM_FLASH, "power down the core is failed:%d",
 				rc);
@@ -527,6 +539,20 @@ static int cam_flash_high(
 
 	return rc;
 }
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+int cam_flash_on(struct cam_flash_ctrl *flash_ctrl,
+	struct cam_flash_frame_setting *flash_data,
+	int mode) {
+	int rc = 0;
+	if (mode == 0) {
+		rc = cam_flash_low(flash_ctrl, flash_data);
+	} else if (mode == 1) {
+		rc = cam_flash_high(flash_ctrl, flash_data);
+	}
+	return rc;
+}
+#endif
 
 static int cam_flash_duration(struct cam_flash_ctrl *fctrl,
 	struct cam_flash_frame_setting *flash_data)
@@ -1881,6 +1907,10 @@ int cam_flash_pmic_pkt_parser(struct cam_flash_ctrl *fctrl, void *arg)
 				(struct cam_flash_query_curr *)cmd_buf;
 #if __or(IS_REACHABLE(CONFIG_LEDS_QPNP_FLASH_V2), \
 			IS_REACHABLE(CONFIG_LEDS_QTI_FLASH))
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			rc = set_flash_max_current_mA(fctrl->flash_max_current);
+			CAM_DBG(CAM_FLASH,"set_flash_max_current_mA");
+#endif
 			rc = cam_flash_led_prepare(fctrl->switch_trigger,
 				QUERY_MAX_AVAIL_CURRENT, &query_curr_ma,
 				soc_private->is_wled_flash);

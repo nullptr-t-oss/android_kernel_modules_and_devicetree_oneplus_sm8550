@@ -99,6 +99,10 @@ int32_t cam_camera_cci_i2c_read_seq(struct cam_sensor_cci_client *cci_client,
 	return rc;
 }
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+#define MAX_IIC_REGISTER_COUNT 10
+#endif
+
 static int32_t cam_cci_i2c_write_table_cmd(
 	struct camera_io_master *client,
 	struct cam_sensor_i2c_reg_setting *write_setting,
@@ -126,6 +130,29 @@ static int32_t cam_cci_i2c_write_table_cmd(
 	rc = v4l2_subdev_call(client->cci_client->cci_subdev,
 		core, ioctl, VIDIOC_MSM_CCI_CFG, &cci_ctrl);
 	if (rc < 0) {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		int32_t i = 0;;
+		for (i = 0; i < write_setting->size; i++)
+		{
+			CAM_INFO(CAM_SENSOR, "iic address 0x%x:write_setting->reg_setting[%d/%d].reg_addr:0x%x, write_setting->reg_setting[%d].reg_addr:0x%x",
+				client->cci_client->sid << 1,
+				i,
+				write_setting->size,
+				write_setting->reg_setting[i].reg_addr,
+				i,
+				write_setting->reg_setting[i].reg_data);
+			if (i >= MAX_IIC_REGISTER_COUNT) {
+				break;
+			}
+		}
+
+		if (write_setting->delay > 20)
+			msleep(write_setting->delay);
+		else if (write_setting->delay)
+			usleep_range(write_setting->delay * 1000, (write_setting->delay
+			* 1000) + 1000);
+
+#endif
 		CAM_ERR(CAM_SENSOR, "Failed rc = %d", rc);
 		return rc;
 	}
