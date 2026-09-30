@@ -45,6 +45,7 @@ struct oplus_clk_osc {
 
 #define DSI_CMD_PPS_HDR_SIZE 7
 #define DSI_MODE_MAX 32
+#define PANEL_REGS_CHECK_NUM_MAX 64
 
 /*
  * Defining custom dsi msg flag.

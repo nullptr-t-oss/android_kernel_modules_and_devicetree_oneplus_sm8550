@@ -1686,6 +1686,7 @@ static ssize_t debugfs_dump_info_read(struct file *file,
 			m->h_active, m->h_back_porch, m->h_front_porch, m->h_sync_width,
 			m->h_sync_polarity, m->v_active, m->v_back_porch, m->v_front_porch,
 			m->v_sync_width, m->v_sync_polarity, m->refresh_rate, m->clk_rate_hz);
+#endif
 	display_for_each_ctrl(i, display) {
 		len += snprintf(buf + len, (SZ_4K - len),
 				"\tCTRL_%d:\n\t\tctrl = %s\n\t\tphy = %s\n",
@@ -8399,6 +8400,30 @@ int dsi_display_set_tpg_state(struct dsi_display *display, bool enable,
 
 	display->is_tpg_enabled = enable;
 error:
+	return rc;
+}
+
+int dsi_display_override_dma_cmd_trig(struct dsi_display *display,
+		enum dsi_trigger_type type)
+{
+	int rc = 0;
+	int i;
+	struct dsi_display_ctrl *ctrl;
+
+	if (!display) {
+		DSI_ERR("Invalid params\n");
+		return -EINVAL;
+	}
+
+	display_for_each_ctrl(i, display) {
+		ctrl = &display->ctrl[i];
+		rc = dsi_ctrl_override_dma_cmd_trig(ctrl->ctrl, type);
+		if (rc) {
+			DSI_ERR("[%s] failed to override dma cmd trigger type for host_%d\n",
+			       display->name, i);
+			break;
+		}
+	}
 	return rc;
 }
 
