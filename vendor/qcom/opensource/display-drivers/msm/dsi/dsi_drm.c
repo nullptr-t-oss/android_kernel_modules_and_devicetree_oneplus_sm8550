@@ -13,8 +13,23 @@
 #include "dsi_drm.h"
 #include "sde_trace.h"
 #include "sde_dbg.h"
+
+#if defined(CONFIG_PXLW_IRIS)
+#include "dsi_iris_api.h"
+#endif
+
 #include "msm_drv.h"
 #include "sde_encoder.h"
+
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+#include "../oplus/oplus_adfr.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+#include "../oplus/oplus_onscreenfingerprint.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+#ifdef OPLUS_FEATURE_DISPLAY
+#include "../oplus/oplus_display_panel_feature.h"
+#endif
 
 #define to_dsi_bridge(x)     container_of((x), struct dsi_bridge, base)
 #define to_dsi_state(x)      container_of((x), struct dsi_connector_state, base)
@@ -195,6 +210,11 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	if (bridge->encoder->crtc->state->active_changed)
 		atomic_set(&c_bridge->display->panel->esd_recovery_pending, 0);
 
+#ifdef OPLUS_FEATURE_DISPLAY
+	mutex_lock(&c_bridge->display->display_lock);
+	oplus_panel_switch_vid_mode(c_bridge->display, &(c_bridge->dsi_mode));
+	mutex_unlock(&c_bridge->display->display_lock);
+#endif
 	/* By this point mode should have been validated through mode_fixup */
 	rc = dsi_display_set_mode(c_bridge->display,
 			&(c_bridge->dsi_mode), 0x0);
@@ -203,7 +223,15 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 		       c_bridge->id, rc);
 		return;
 	}
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	mutex_lock(&c_bridge->display->display_lock);
+	oplus_panel_switch_vid_mode_post(c_bridge->display, &(c_bridge->dsi_mode));
+	mutex_unlock(&c_bridge->display->display_lock);
 
+	if (oplus_ofp_is_supported() && oplus_ofp_video_mode_30hz_aod_is_enabled()) {
+		oplus_ofp_video_mode_refresh_flag_update(&(c_bridge->dsi_mode));
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 	if (c_bridge->dsi_mode.dsi_mode_flags &
 		(DSI_MODE_FLAG_SEAMLESS | DSI_MODE_FLAG_VRR |
 		 DSI_MODE_FLAG_DYN_CLK)) {
@@ -265,6 +293,12 @@ static void dsi_bridge_enable(struct drm_bridge *bridge)
 
 	if (display && display->drm_conn) {
 		sde_connector_helper_bridge_enable(display->drm_conn);
+
+#if defined(CONFIG_PXLW_IRIS)
+		if (iris_is_chip_supported())
+			iris_ioctl_unlock();
+#endif
+
 		if (display->poms_pending) {
 			display->poms_pending = false;
 			sde_connector_schedule_status_work(display->drm_conn,
@@ -300,6 +334,10 @@ static void dsi_bridge_disable(struct drm_bridge *bridge)
 						&conn_state->msm_mode);
 
 		sde_connector_helper_bridge_disable(display->drm_conn);
+#if defined(CONFIG_PXLW_IRIS)
+		if (iris_is_chip_supported())
+			iris_ioctl_lock();
+#endif
 	}
 
 	rc = dsi_display_pre_disable(c_bridge->display);
@@ -539,6 +577,10 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 		return false;
 	}
 
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	oplus_adfr_te_source_vsync_switch_mode_fixup(display, &dsi_mode, panel_dsi_mode);
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
 	rc = dsi_display_validate_mode(c_bridge->display, &dsi_mode,
 			DSI_VALIDATE_FLAG_ALLOW_ADJUST);
 	if (rc) {
@@ -551,6 +593,10 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 		DSI_ERR("[%s] failed to validate dsi bridge mode.\n", display->name);
 		return false;
 	}
+#ifdef OPLUS_FEATURE_DISPLAY
+	if (display->is_cont_splash_enabled)
+		dsi_mode.dsi_mode_flags &= ~DSI_MODE_FLAG_DMS;
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 	/* Reject seamless transition when active changed */
 	if (crtc_state->active_changed &&

@@ -284,7 +284,6 @@ int ese_cold_reset_ioctl(struct nfc_dev *nfc_dev, unsigned long arg)
 			/* free buffers and exit with pass */
 			goto err;
 		}
-
 	case ESE_COLD_RESET_PROTECT_DIS:
 
 		if (nfc_dev->cold_reset.is_crp_en &&

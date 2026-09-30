@@ -638,8 +638,12 @@ static void msm_audio_add_qos_request(void)
                                                 __func__, ret, cpu);
 		pr_debug("%s set cpu affinity to logical core %d.\n", __func__, cpu);
 
+#ifndef OPLUS_ARCH_EXTENDS
 		/* Limit the request to 2 silver cpu cores. */
 		if (++num_req == 2)
+#else /* OPLUS_ARCH_EXTENDS */
+		if (++num_req == 3)
+#endif /* OPLUS_ARCH_EXTENDS */
 			break;
 	}
 }
@@ -963,8 +967,12 @@ static void msm_audio_update_qos_request(u32 latency)
 				pr_err("%s: failed to update latency of core %d, error %d \n",
 								__func__, cpu, ret);
 			}
-			/* Limit the request to 2 Silver CPU cores. */
-			if (++num_req == 2)
+#ifndef OPLUS_ARCH_EXTENDS
+		/* Limit the request to 2 silver cpu cores. */
+		if (++num_req == 2)
+#else /* OPLUS_ARCH_EXTENDS */
+		if (++num_req == 3)
+#endif /* OPLUS_ARCH_EXTENDS */
 				break;
 		}
 	}

@@ -197,6 +197,17 @@ struct cam_eeprom_ctrl_t {
 	uint16_t is_multimodule_mode;
 	struct i2c_settings_array wr_settings;
 	struct eebin_info eebin_info;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	uint8_t change_cci;
+	uint8_t actuator_ois_eeprom_merge_flag;
+	struct camera_io_master io_master_info_ois;
+	struct mutex *actuator_ois_eeprom_merge_mutex;
+	enum cci_i2c_master_t cci_i2c_master_ois;
+	enum cci_device_num cci_num_ois;
+	bool userspace_crash;
+	uint32_t startAddr;
+#endif
+
 };
 
 int32_t cam_eeprom_update_i2c_info(struct cam_eeprom_ctrl_t *e_ctrl,

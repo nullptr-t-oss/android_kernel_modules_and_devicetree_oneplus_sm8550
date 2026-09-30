@@ -380,7 +380,6 @@ int nfc_i2c_dev_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	nfc_dev->nfc_write = i2c_write;
 	nfc_dev->nfc_enable_intr = i2c_enable_irq;
 	nfc_dev->nfc_disable_intr = i2c_disable_irq;
-
 	ret = configure_gpio(nfc_gpio->irq, GPIO_IRQ);
 	if (ret <= 0) {
 		pr_err("%s: unable to request nfc irq gpio [%d]\n", __func__,
@@ -444,7 +443,6 @@ int nfc_i2c_dev_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	pr_info("%s: probing nfc i2c success\n", __func__);
 	return 0;
-
 
 err_ldo_config_failed:
 	free_irq(client->irq, nfc_dev);

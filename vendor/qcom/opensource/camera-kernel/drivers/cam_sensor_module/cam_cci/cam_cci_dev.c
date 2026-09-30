@@ -28,6 +28,10 @@ struct v4l2_subdev *cam_cci_get_subdev(int cci_dev_index)
 	return sub_device;
 }
 
+//ifdef OPLUS_FEATURE_EXPLORER_AON
+EXPORT_SYMBOL(cam_cci_get_subdev);
+//endif
+
 static long cam_cci_subdev_ioctl(struct v4l2_subdev *sd,
 	unsigned int cmd, void *arg)
 {
@@ -459,7 +463,11 @@ static int cam_cci_component_bind(struct device *dev,
 	struct cam_cpas_register_params cpas_parms;
 	struct cci_device *new_cci_dev;
 	struct cam_hw_soc_info *soc_info = NULL;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	int i, rc = 0;
+#else
 	int rc = 0;
+#endif
 	struct platform_device *pdev = to_platform_device(dev);
 
 	new_cci_dev = devm_kzalloc(&pdev->dev, sizeof(struct cci_device),
@@ -512,6 +520,10 @@ static int cam_cci_component_bind(struct device *dev,
 
 	g_cci_subdev[soc_info->index] = &new_cci_dev->v4l2_dev_str.sd;
 	mutex_init(&(new_cci_dev->init_mutex));
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	for (i = 0; i < MASTER_MAX; i++)
+		mutex_init(&(new_cci_dev->master_mutex[i]));
+#endif
 	CAM_DBG(CAM_CCI, "Device Type :%d", soc_info->index);
 
 	cpas_parms.cam_cpas_client_cb = NULL;

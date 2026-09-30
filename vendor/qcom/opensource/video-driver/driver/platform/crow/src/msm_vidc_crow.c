@@ -111,7 +111,11 @@ static struct msm_platform_core_capability core_data_crow_v1[] = {
 	{MAX_RT_MBPF, 40800}, /* ((3840x2176)/256) + (1920x1088)/256 */
 	{MAX_MBPF, 69632}, /* ((4096x2176)/256) x 2 */
 	{MAX_MBPS, 1224000}, /* Concurrency: UHD@30 decode + 1080p@30 encode */
-	{MAX_ENC_MBPS, 1044480}, /* max_enc_load 4096x2176@30fps */
+#ifndef OPLUS_BUG_STABILITY
+	{MAX_ENC_MBPS, 1044480}, /* max_load 4096x2176@30fps */
+#else /* OPLUS_BUG_STABILITY*/
+	{MAX_ENC_MBPS, 1087200}, /* max_load 720x1280@30fps+1920*1088@120fps */
+#endif /* OPLUS_BUG_STABILITY */
 	{MAX_IMAGE_MBPF, 1048576},  /* (16384x16384)/256 */
 	/* TODO (AM) : review required for HQ and B_FRAME and ALL INTRA */
 	{MAX_MBPF_HQ, 8160}, /* ((1920x1088)/256) */

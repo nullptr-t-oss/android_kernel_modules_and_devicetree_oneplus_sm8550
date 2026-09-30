@@ -19,6 +19,9 @@
 #define SDE_CONNECTOR_NAME_SIZE	16
 #define SDE_CONNECTOR_DHDR_MEMPOOL_MAX_SIZE	SZ_32
 #define MAX_CMD_RECEIVE_SIZE       256
+#if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
+#define SDE_CONNECTOR_SYNC_DATA_NUM 3
+#endif
 #define DNSC_BLUR_MAX_COUNT	1
 
 struct sde_connector;
@@ -482,6 +485,16 @@ struct sde_connector_dyn_hdr_metadata {
 	bool dynamic_hdr_update;
 };
 
+#if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
+struct sde_connector_sync_data {
+	bool panel_bl_dirty;
+	u32 panel_bl;
+	u32 bl_sync_dly;
+	/* wait (wait_vsync_flag - 1) periods of TE between send backlight and kickoff */
+	int wait_vsync_flag;
+};
+#endif
+
 /**
  * struct sde_misr_sign - defines sde misr signature structure
  * @num_valid_misr : count of valid misr signature
@@ -631,13 +644,38 @@ struct sde_connector {
 
 	u8 cmd_rx_buf[MAX_CMD_RECEIVE_SIZE];
 	int rx_len;
-
+#if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
+	u32 bl_rd_index;
+	u32 bl_wr_index;
+	ktime_t rd_ptr_ktime;
+	spinlock_t bl_spinlock;
+	struct sde_connector_sync_data sync_data[SDE_CONNECTOR_SYNC_DATA_NUM];
+#endif
 	struct edid *cached_edid;
+#ifdef OPLUS_FEATURE_DISPLAY
+	/* Used to indicate whether to update panel backlight in crtc_commit */
+	bool bl_need_sync;
+	bool bl_nits_dirty;
+	bool dimming_scale_dirty;
+	bool osc_need_update;
+#endif /* OPLUS_FEATURE_DISPLAY */
 	bool misr_event_notify_enabled;
 	struct sde_misr_sign previous_misr_sign;
 
 	bool hwfence_wb_retire_fences_enable;
 };
+
+#ifdef OPLUS_FEATURE_DISPLAY
+struct dc_apollo_pcc_sync {
+	wait_queue_head_t bk_wait;
+	int dc_pcc_updated;
+	__u32 pcc;
+	__u32 pcc_last;
+	__u32 pcc_current;
+	struct mutex lock;
+	int backlight_pending;
+};
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 /**
  * to_sde_connector - convert drm_connector pointer to sde connector pointer
@@ -1343,4 +1381,15 @@ const char *sde_conn_get_topology_name(struct drm_connector *conn,
  */
 bool sde_connector_is_line_insertion_supported(struct sde_connector *sde_conn);
 
+#ifdef OPLUS_FEATURE_DISPLAY
+int _sde_connector_update_bl_scale_(struct sde_connector *c_conn);
+#endif /* OPLUS_FEATURE_DISPLAY */
+#if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
+/**
+ * sde_connector_update_panel_level - update panel level
+ * @connector: Pointer to sde connector structure
+ * Returns: Zero on success
+ */
+int sde_connector_update_panel_level(struct sde_connector *c_conn);
+#endif
 #endif /* _SDE_CONNECTOR_H_ */
