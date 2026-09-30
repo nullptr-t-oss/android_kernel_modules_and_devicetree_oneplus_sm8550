@@ -31,6 +31,10 @@
  */
 #define CAM_WORKQ_FLAG_SERIAL                    (1 << 1)
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+#define CAM_WORKQ_FLAG_UX                        (1 << 2)
+#endif
+
 /* Task priorities, lower the number higher the priority*/
 enum crm_task_priority {
 	CRM_TASK_PRIORITY_0,
@@ -109,6 +113,10 @@ struct cam_req_mgr_core_workq {
 		struct crm_workq_task *pool;
 		uint32_t               num_task;
 	} task;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	struct task_struct   *thread;
+	struct mutex         rt_lock;
+#endif
 };
 
 /**

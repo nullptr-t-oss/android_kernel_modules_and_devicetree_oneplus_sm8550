@@ -12,6 +12,9 @@
 #include "sde_hw_catalog.h"
 #include "sde_hw_sspp.h"
 #include "sde_fence.h"
+#ifdef OPLUS_FEATURE_DISPLAY
+#include "oplus_sde_fence.h"
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 #define INVALID_CTL_STATUS 0xfffff88e
 #define CTL_MAX_DSPP_COUNT (DSPP_MAX - DSPP_0)

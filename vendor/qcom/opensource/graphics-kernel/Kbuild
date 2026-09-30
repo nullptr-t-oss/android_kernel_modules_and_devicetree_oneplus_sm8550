@@ -42,7 +42,7 @@ ifeq ($(CONFIG_ARCH_SCUBA), y)
 	include $(KGSL_PATH)/config/gki_scuba.conf
 endif
 
-ccflags-y += -I$(KGSL_PATH) -I$(KGSL_PATH)/include/linux -I$(KGSL_PATH)/include -I$(KERNEL_SRC)/drivers/devfreq -I$(KERNEL_SRC)/drivers/iommu
+ccflags-y += -I$(KGSL_PATH) -I$(KGSL_PATH)/include/linux -I$(KGSL_PATH)/include -I$(KERNEL_SRC)/drivers/devfreq -I$(KERNEL_SRC)/drivers/iommu -I$(KERNEL_SRC)/mm/oplus_mm
 
 obj-$(CONFIG_QCOM_KGSL) += msm_kgsl.o
 
@@ -129,3 +129,10 @@ msm_kgsl-$(CONFIG_QCOM_KGSL_CORESIGHT) += adreno_a5xx_coresight.o
 msm_kgsl-$(CONFIG_QCOM_KGSL_CORESIGHT) += adreno_a6xx_coresight.o
 msm_kgsl-$(CONFIG_QCOM_KGSL_CORESIGHT) += adreno_gen7_coresight.o
 msm_kgsl-$(CONFIG_DEBUG_FS) += adreno_debugfs.o adreno_profile.o
+
+#ifdef OPLUS_SYNC_FENCE
+CONFIG_OPLUS_SYNC_FENCE = m
+ccflags-y += -I$(KERNEL_SRC)
+obj-$(CONFIG_OPLUS_SYNC_FENCE) += oplus_sync_fence.o
+oplus_sync_fence-y = oplus_sync_fence/oplus_sync_file.o
+#endif

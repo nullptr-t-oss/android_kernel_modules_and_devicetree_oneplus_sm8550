@@ -13,8 +13,14 @@
 #include "cam_debug_util.h"
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+#include "oplus_cam_eeprom_core.h"
+#endif
 
 #define MAX_READ_SIZE  0x7FFFF
+
+extern uint64_t total_size;
+extern bool chip_version_old;
 
 /**
  * cam_eeprom_read_memory() - read map data into buffer
@@ -103,6 +109,25 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 			}
 		}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		if (e_ctrl->actuator_ois_eeprom_merge_flag)
+		{
+			CAM_DBG(CAM_EEPROM, "before actuator_ois_eeprom_merge_flag lock");
+			mutex_lock(e_ctrl->actuator_ois_eeprom_merge_mutex);
+			CAM_DBG(CAM_EEPROM, "after actuator_ois_eeprom_merge_flag lock");
+		}
+
+		if (e_ctrl->io_master_info.cci_client->sid==0x24) {
+			rc = oplus_cam_eeprom_read_memory(e_ctrl, emap, j, memptr);
+			if (rc < 0) {
+				CAM_ERR(CAM_EEPROM, "cam_eeprom_read_memory_oem failed rc %d",rc);
+				goto error_handle;
+			}
+			if(j > 0){
+				memptr += total_size;
+			}
+		}else{
+#endif
 		if (emap[j].mem.valid_size) {
 			rc = camera_io_dev_read_seq(&e_ctrl->io_master_info,
 				emap[j].mem.addr, memptr,
@@ -112,10 +137,22 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 			if (rc < 0) {
 				CAM_ERR(CAM_EEPROM, "read failed rc %d",
 					rc);
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+				goto error_handle;
+#else
 				return rc;
+#endif
 			}
 			memptr += emap[j].mem.valid_size;
 		}
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		}
+
+		if (e_ctrl->actuator_ois_eeprom_merge_flag)
+		{
+			mutex_unlock(e_ctrl->actuator_ois_eeprom_merge_mutex);
+		}
+#endif
 
 		if (emap[j].pageen.valid_size) {
 			i2c_reg_settings.addr_type = emap[j].pageen.addr_type;
@@ -135,6 +172,16 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 			}
 		}
 	}
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	total_size = 0;
+	return rc;
+
+error_handle:
+	if (e_ctrl->actuator_ois_eeprom_merge_flag)
+	{
+		mutex_unlock(e_ctrl->actuator_ois_eeprom_merge_mutex);
+	}
+#endif
 	return rc;
 }
 
@@ -145,7 +192,11 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
  *
  * Returns success or failure
  */
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+int cam_eeprom_power_up(struct cam_eeprom_ctrl_t *e_ctrl,
+#else
 static int cam_eeprom_power_up(struct cam_eeprom_ctrl_t *e_ctrl,
+#endif
 	struct cam_sensor_power_ctrl_t *power_info)
 {
 	int32_t                                 rc = 0;
@@ -179,7 +230,11 @@ static int cam_eeprom_power_up(struct cam_eeprom_ctrl_t *e_ctrl,
 	if (e_ctrl->io_master_info.master_type == I3C_MASTER)
 		i3c_probe_completion = cam_eeprom_get_i3c_completion(e_ctrl->soc_info.index);
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	rc = cam_sensor_core_power_up(power_info, soc_info, i3c_probe_completion, &(e_ctrl->io_master_info));
+#else
 	rc = cam_sensor_core_power_up(power_info, soc_info, i3c_probe_completion);
+#endif
 	if (rc) {
 		CAM_ERR(CAM_EEPROM, "failed in eeprom power up rc %d", rc);
 		return rc;
@@ -193,9 +248,23 @@ static int cam_eeprom_power_up(struct cam_eeprom_ctrl_t *e_ctrl,
 		}
 	}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (e_ctrl->change_cci && (chip_version_old == FALSE)) {
+		rc = camera_io_init(&(e_ctrl->io_master_info_ois));
+		if (rc) {
+			CAM_ERR(CAM_EEPROM, "cci_init failed");
+			return -EINVAL;
+		}
+	}
+#endif
+
 	return rc;
 cci_failure:
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (cam_sensor_util_power_down(power_info, soc_info, &(e_ctrl->io_master_info)))
+#else
 	if (cam_sensor_util_power_down(power_info, soc_info))
+#endif
 		CAM_ERR(CAM_EEPROM, "Power down failure");
 
 	return rc;
@@ -207,7 +276,11 @@ cci_failure:
  *
  * Returns success or failure
  */
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+int cam_eeprom_power_down(struct cam_eeprom_ctrl_t *e_ctrl)
+#else
 static int cam_eeprom_power_down(struct cam_eeprom_ctrl_t *e_ctrl)
+#endif
 {
 	struct cam_sensor_power_ctrl_t *power_info;
 	struct cam_hw_soc_info         *soc_info;
@@ -228,7 +301,11 @@ static int cam_eeprom_power_down(struct cam_eeprom_ctrl_t *e_ctrl)
 		CAM_ERR(CAM_EEPROM, "failed: power_info %pK", power_info);
 		return -EINVAL;
 	}
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	rc = cam_sensor_util_power_down(power_info, soc_info, &(e_ctrl->io_master_info));
+#else
 	rc = cam_sensor_util_power_down(power_info, soc_info);
+#endif
 	if (rc) {
 		CAM_ERR(CAM_EEPROM, "power down the core is failed:%d", rc);
 		return rc;
@@ -236,6 +313,11 @@ static int cam_eeprom_power_down(struct cam_eeprom_ctrl_t *e_ctrl)
 
 	if (e_ctrl->io_master_info.master_type == CCI_MASTER)
 		camera_io_release(&(e_ctrl->io_master_info));
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (e_ctrl->change_cci && (chip_version_old == FALSE)) {
+		camera_io_release(&(e_ctrl->io_master_info_ois));
+	}
+#endif
 
 	return rc;
 }
@@ -1449,7 +1531,9 @@ void cam_eeprom_shutdown(struct cam_eeprom_ctrl_t *e_ctrl)
 	struct cam_eeprom_soc_private  *soc_private =
 		(struct cam_eeprom_soc_private *)e_ctrl->soc_info.soc_private;
 	struct cam_sensor_power_ctrl_t *power_info = &soc_private->power_info;
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	e_ctrl->userspace_crash = TRUE;
+#endif
 	if (e_ctrl->cam_eeprom_state == CAM_EEPROM_INIT)
 		return;
 
@@ -1505,6 +1589,13 @@ int32_t cam_eeprom_driver_cmd(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 	}
 
 	mutex_lock(&(e_ctrl->eeprom_mutex));
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	rc = cam_eeprom_driver_cmd_oem(e_ctrl,arg);
+	if (rc) {
+		CAM_ERR(CAM_EEPROM, "Failed in check eeprom data");
+		goto release_mutex;
+	}
+#endif
 	switch (cmd->op_code) {
 	case CAM_QUERY_CAP:
 		eeprom_cap.slot_info = e_ctrl->soc_info.index;

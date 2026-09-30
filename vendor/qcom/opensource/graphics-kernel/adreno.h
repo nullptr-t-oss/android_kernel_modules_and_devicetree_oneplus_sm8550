@@ -688,7 +688,6 @@ struct adreno_device {
 	struct dentry *preemption_debugfs_dir;
 	/* @hwsched_enabled: If true, hwsched is enabled */
 	bool hwsched_enabled;
-
 };
 
 /**

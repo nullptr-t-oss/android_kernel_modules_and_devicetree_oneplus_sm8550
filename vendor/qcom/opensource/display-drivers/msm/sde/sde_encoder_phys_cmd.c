@@ -10,6 +10,23 @@
 #include "sde_core_irq.h"
 #include "sde_formats.h"
 #include "sde_trace.h"
+#if defined(CONFIG_PXLW_IRIS)
+#include "dsi_iris_api.h"
+#endif
+#ifdef OPLUS_FEATURE_DISPLAY
+#include "../oplus/oplus_display_panel_common.h"
+#include "../oplus/oplus_display_interface.h"
+#endif /* OPLUS_FEATURE_DISPLAY */
+
+
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+#include "../oplus/oplus_adfr.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+#include "../oplus/oplus_onscreenfingerprint.h"
+#define OPLUS_OFP_ULTRA_LOW_POWER_AOD_VBLANK_TIMEOUT_MS	1000
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 #define SDE_DEBUG_CMDENC(e, fmt, ...) SDE_DEBUG("enc%d intf%d " fmt, \
 		(e) && (e)->base.parent ? \
@@ -33,8 +50,14 @@
 #define DEFAULT_TEARCHECK_SYNC_THRESH_CONTINUE	4
 
 #define SDE_ENC_WR_PTR_START_TIMEOUT_US 20000
+#if defined(PXLW_IRIS_DUAL)
+/* decrease polling time, to reduce prepare_commit time */
+#define AUTOREFRESH_SEQ1_POLL_TIME	(iris_is_dual_supported() ? 1000 : 2000)
+#define AUTOREFRESH_SEQ2_POLL_TIME	(iris_is_dual_supported() ? 1000 : 25000)
+#else
 #define AUTOREFRESH_SEQ1_POLL_TIME	2000
 #define AUTOREFRESH_SEQ2_POLL_TIME	25000
+#endif
 #define AUTOREFRESH_SEQ2_POLL_TIMEOUT	1000000
 
 static inline int _sde_encoder_phys_cmd_get_idle_timeout(
@@ -70,6 +93,12 @@ static uint64_t _sde_encoder_phys_cmd_get_autorefresh_property(
 
 	if (!conn || !conn->state)
 		return 0;
+#if defined(CONFIG_PXLW_IRIS)
+	if (iris_is_chip_supported()) {
+		if (iris_is_display1_autorefresh_enabled(phys_enc))
+			return 1;
+	}
+#endif
 
 	return sde_connector_get_property(conn->state,
 				CONNECTOR_PROP_AUTOREFRESH);
@@ -251,6 +280,17 @@ static void _sde_encoder_phys_signal_frame_done(struct sde_encoder_phys *phys_en
 
 	/* Signal any waiting atomic commit thread */
 	wake_up_all(&phys_enc->pending_kickoff_wq);
+
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	oplus_adfr_irq_handler(phys_enc, OPLUS_ADFR_PP_DONE);
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_pressed_icon_status_update(phys_enc, OPLUS_OFP_PP_DONE);
+		oplus_ofp_aod_display_on_set(phys_enc);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 }
 
 static void sde_encoder_phys_cmd_ctl_done_irq(void *arg, int irq_idx)
@@ -317,9 +357,23 @@ static void sde_encoder_phys_cmd_te_rd_ptr_irq(void *arg, int irq_idx)
 	struct sde_encoder_phys_cmd_te_timestamp *te_timestamp;
 	unsigned long lock_flags;
 	u32 fence_ready = 0;
+#if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS) || defined(OPLUS_FEATURE_DISPLAY)
+	struct sde_connector *conn;
+#endif
 
 	if (!phys_enc || !phys_enc->hw_pp || !phys_enc->hw_intf || !phys_enc->hw_ctl)
 		return;
+
+#if defined(CONFIG_PXLW_IRIS) || defined(CONFIG_PXLW_SOFT_IRIS)
+	if (iris_is_chip_supported() || iris_is_softiris_supported()) {
+		conn = to_sde_connector(phys_enc->connector);
+		if (conn) {
+			spin_lock_irqsave(&conn->bl_spinlock, lock_flags);
+			conn->rd_ptr_ktime = ktime_get();
+			spin_unlock_irqrestore(&conn->bl_spinlock, lock_flags);
+		}
+	}
+#endif
 
 	SDE_ATRACE_BEGIN("rd_ptr_irq");
 	cmd_enc = to_sde_encoder_phys_cmd(phys_enc);
@@ -338,6 +392,13 @@ static void sde_encoder_phys_cmd_te_rd_ptr_irq(void *arg, int irq_idx)
 	}
 	spin_unlock_irqrestore(phys_enc->enc_spinlock, lock_flags);
 
+#ifdef OPLUS_FEATURE_DISPLAY
+        conn = to_sde_connector(phys_enc->connector);
+        if (conn && te_timestamp) {
+            oplus_save_te_timestamp(conn, te_timestamp->timestamp);
+        }
+#endif /* OPLUS_FEATURE_DISPLAY */
+
 	if ((scheduler_status != 0x1) && ctl->ops.get_hw_fence_status)
 		fence_ready = ctl->ops.get_hw_fence_status(ctl);
 
@@ -353,6 +414,28 @@ static void sde_encoder_phys_cmd_te_rd_ptr_irq(void *arg, int irq_idx)
 
 	atomic_add_unless(&cmd_enc->pending_vblank_cnt, -1, 0);
 	wake_up_all(&cmd_enc->pending_vblank_wq);
+
+#ifdef OPLUS_FEATURE_DISPLAY
+	conn = to_sde_connector(phys_enc->connector);
+	if (conn) {
+		oplus_panel_cmdq_pack_status_reset(conn);
+		oplus_set_pwm_switch_cmd_te_flag(conn);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY */
+
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	oplus_adfr_irq_handler(phys_enc, OPLUS_ADFR_RD_PTR);
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_aod_off_hbm_on_delay_check(phys_enc);
+		oplus_ofp_pressed_icon_status_update(phys_enc, OPLUS_OFP_RD_PTR);
+		oplus_ofp_panel_hbm_status_update(phys_enc);
+		oplus_ofp_notify_uiready(phys_enc);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
 	SDE_ATRACE_END("rd_ptr_irq");
 }
 
@@ -392,6 +475,17 @@ static void sde_encoder_phys_cmd_wr_ptr_irq(void *arg, int irq_idx)
 
 	/* Signal any waiting wr_ptr start interrupt */
 	wake_up_all(&phys_enc->pending_kickoff_wq);
+
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	oplus_adfr_irq_handler(phys_enc, OPLUS_ADFR_WD_PTR);
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_pressed_icon_status_update(phys_enc, OPLUS_OFP_WD_PTR);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
 	SDE_ATRACE_END("wr_ptr_irq");
 }
 
@@ -981,7 +1075,11 @@ void sde_encoder_phys_cmd_irq_control(struct sde_encoder_phys *phys_enc,
 	}
 }
 
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+int _get_tearcheck_threshold(struct sde_encoder_phys *phys_enc)
+#else
 static int _get_tearcheck_threshold(struct sde_encoder_phys *phys_enc)
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 {
 	struct drm_connector *conn = phys_enc->connector;
 	u32 qsync_mode;
@@ -1001,6 +1099,10 @@ static int _get_tearcheck_threshold(struct sde_encoder_phys *phys_enc)
 	qsync_mode = sde_connector_get_qsync_mode(conn);
 	threshold_lines = adjusted_threshold_lines = DEFAULT_TEARCHECK_SYNC_THRESH_START;
 
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	OPLUS_ADFR_TRACE_BEGIN("_get_tearcheck_threshold");
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
 	if (mode && (qsync_mode == SDE_RM_QSYNC_CONTINUOUS_MODE)) {
 		u32 qsync_min_fps = 0;
 		ktime_t qsync_time_ns;
@@ -1015,10 +1117,23 @@ static int _get_tearcheck_threshold(struct sde_encoder_phys *phys_enc)
 			phys_enc->parent_ops.get_qsync_fps(phys_enc->parent, &qsync_min_fps,
 					conn->state);
 
+
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+		if (oplus_adfr_get_osync_window_min_fps(conn) >= 0) {
+			qsync_min_fps = oplus_adfr_get_osync_window_min_fps(conn);
+		}
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
 		if (!qsync_min_fps || !default_fps || !yres) {
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+			SDE_DEBUG_CMDENC(cmd_enc,
+				"wrong qsync params %d %d %d\n",
+				qsync_min_fps, default_fps, yres);
+#else
 			SDE_ERROR_CMDENC(cmd_enc,
 				"wrong qsync params %d %d %d\n",
 				qsync_min_fps, default_fps, yres);
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 			goto exit;
 		}
 
@@ -1055,6 +1170,10 @@ static int _get_tearcheck_threshold(struct sde_encoder_phys *phys_enc)
 		if (adjusted_threshold_lines - 2 > DEFAULT_TEARCHECK_SYNC_THRESH_START)
 			adjusted_threshold_lines -= 2;
 
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+		oplus_adfr_osync_threshold_lines_update(conn, &adjusted_threshold_lines, yres);
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
+
 		SDE_DEBUG_CMDENC(cmd_enc,
 			"qsync mode:%u min_fps:%u time:%lld low:%lld up:%lld jitter:%u/%u\n",
 			qsync_mode, qsync_min_fps, qsync_time_ns, qsync_l_bound_ns,
@@ -1072,6 +1191,13 @@ static int _get_tearcheck_threshold(struct sde_encoder_phys *phys_enc)
 	}
 
 exit:
+
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	SDE_DEBUG_CMDENC(cmd_enc, "osync_mode:%u,osync_window_min_fps:%u,threshold_lines:%u\n",
+								qsync_mode, oplus_adfr_get_osync_window_min_fps(conn), adjusted_threshold_lines);
+	OPLUS_ADFR_TRACE_INT("oplus_adfr_threshold_lines", adjusted_threshold_lines);
+	OPLUS_ADFR_TRACE_END("_get_tearcheck_threshold");
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 
 	return adjusted_threshold_lines;
 }
@@ -1513,6 +1639,12 @@ static int sde_encoder_phys_cmd_prepare_for_kickoff(
 		phys_enc->recovered = false;
 	}
 
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	oplus_adfr_force_off_osync_mode(phys_enc);
+	if (oplus_adfr_osync_tearcheck_update(phys_enc) != -ENOTSUPP) {
+		SDE_DEBUG_CMDENC(cmd_enc, "use custom function\n");
+	} else {
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 	if (sde_connector_is_qsync_updated(phys_enc->connector)) {
 		tc_cfg.sync_threshold_start = _get_tearcheck_threshold(
 				phys_enc);
@@ -1526,6 +1658,12 @@ static int sde_encoder_phys_cmd_prepare_for_kickoff(
 					phys_enc->hw_pp, &tc_cfg);
 		SDE_EVT32(DRMID(phys_enc->parent), tc_cfg.sync_threshold_start);
 	}
+
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	}
+
+	oplus_adfr_adjust_osync_tearcheck(phys_enc);
+#endif /* OPLUS_FEATURE_DISPLAY_ADFR */
 
 	SDE_DEBUG_CMDENC(cmd_enc, "pp:%d pending_cnt %d\n",
 			phys_enc->hw_pp->idx - PINGPONG_0,
@@ -1695,6 +1833,7 @@ static int sde_encoder_phys_cmd_wait_for_tx_complete(
 		SDE_EVT32(DRMID(phys_enc->parent),
 				phys_enc->intf_idx - INTF_0);
 		SDE_ERROR("failed wait_for_idle: %d\n", rc);
+		oplus_sde_evtlog_dump_all();
 	}
 
 	return rc;
@@ -1738,6 +1877,10 @@ static int _sde_encoder_phys_cmd_handle_wr_ptr_timeout(
 		SDE_ERROR_CMDENC(cmd_enc,
 			"wr_ptr_irq wait failed, switch_te:%d\n", switch_te);
 		SDE_EVT32(DRMID(phys_enc->parent), switch_te, SDE_EVTLOG_ERROR);
+#ifdef OPLUS_FEATURE_DISPLAY
+		EXCEPTION_TRACKPOINT_REPORT("DisplayDriverID@@%d$$wr_ptr_irq timeout failed, switch_te=%d\n",
+						OPLUS_DISP_Q_ERROR_PTR_TIMEOUT, switch_te);
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 		if (sde_encoder_phys_cmd_is_master(phys_enc) &&
 			atomic_add_unless(
@@ -1847,7 +1990,17 @@ static int sde_encoder_phys_cmd_wait_for_vblank(
 
 	wait_info.wq = &cmd_enc->pending_vblank_wq;
 	wait_info.atomic_cnt = &cmd_enc->pending_vblank_cnt;
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported() && oplus_ofp_ultra_low_power_aod_is_enabled()
+			&& oplus_ofp_get_ultra_low_power_aod_state()) {
+		wait_info.timeout_ms = OPLUS_OFP_ULTRA_LOW_POWER_AOD_VBLANK_TIMEOUT_MS;
+	} else {
+		wait_info.timeout_ms = _sde_encoder_phys_cmd_get_idle_timeout(phys_enc);
+	}
+#else
 	wait_info.timeout_ms = _sde_encoder_phys_cmd_get_idle_timeout(phys_enc);
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 	atomic_inc(&cmd_enc->pending_vblank_cnt);
 
@@ -1919,6 +2072,9 @@ static void _sde_encoder_autorefresh_disable_seq1(
 		trial++;
 	} while (_sde_encoder_phys_cmd_is_ongoing_pptx(phys_enc));
 }
+#if defined(PXLW_IRIS_DUAL)
+#include "sde_iris_encoder_phys_cmd.c"
+#endif
 
 static void _sde_encoder_autorefresh_disable_seq2(
 		struct sde_encoder_phys *phys_enc)
@@ -1952,7 +2108,12 @@ static void _sde_encoder_autorefresh_disable_seq2(
 	SDE_EVT32(DRMID(phys_enc->parent), phys_enc->intf_idx - INTF_0,
 				autorefresh_status, SDE_EVTLOG_FUNC_CASE1);
 
+#if defined(PXLW_IRIS_DUAL)
+	/* donot get autorefresh_status second time for 120hz case */
+	if (!(autorefresh_status & BIT(7)) && !iris_is_dual_supported()) {
+#else
 	if (!(autorefresh_status & BIT(7))) {
+#endif
 		usleep_range(AUTOREFRESH_SEQ2_POLL_TIME,
 			AUTOREFRESH_SEQ2_POLL_TIME + 1);
 
@@ -2015,6 +2176,11 @@ static void _sde_encoder_phys_disable_autorefresh(struct sde_encoder_phys *phys_
 
 	if (sde_kms && sde_kms->catalog &&
 			(sde_kms->catalog->autorefresh_disable_seq == AUTOREFRESH_DISABLE_SEQ1)) {
+	#if defined(PXLW_IRIS_DUAL)
+		if (iris_is_dual_supported())
+			_iris_sde_encoder_autorefresh_disable_seq1(phys_enc);
+		else
+	#endif
 		_sde_encoder_autorefresh_disable_seq1(phys_enc);
 		_sde_encoder_autorefresh_disable_seq2(phys_enc);
 	}

@@ -334,7 +334,6 @@ struct iommu_domain;
  */
 int gmu_core_map_memdesc(struct iommu_domain *domain, struct kgsl_memdesc *memdesc,
 		u64 gmuaddr, int attrs);
-
 /**
  * gmu_core_send_tlb_hint - Send tlb hint for GMU IOMMU domain
  * @device: Pointer to KGSL device

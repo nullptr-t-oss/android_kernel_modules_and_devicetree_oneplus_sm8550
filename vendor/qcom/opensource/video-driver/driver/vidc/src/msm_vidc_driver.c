@@ -4086,7 +4086,6 @@ int msm_vidc_get_internal_buffers(struct msm_vidc_inst *inst,
 		buffers->size = buf_size;
 		buffers->min_count = buf_count;
 	}
-
 	return 0;
 }
 

@@ -11,6 +11,8 @@
 #include <linux/errno.h>
 #include <linux/mutex.h>
 #include <linux/soc/qcom/msm_hw_fence.h>
+#include "sde_hw_ctl.h"
+#include "sde_hw_top.h"
 
 #ifndef CHAR_BIT
 #define CHAR_BIT 8 /* define this if limits.h not available */
@@ -24,7 +26,9 @@
 
 #define SDE_FENCE_NAME_SIZE	24
 
+#ifndef OPLUS_FEATURE_DISPLAY
 #define MAX_SDE_HFENCE_OUT_SIGNAL_PING_PONG 2
+#endif /* OPLUS_FEATURE_DISPLAY */
 /**
  * struct sde_fence_context - release/retire fence context/timeline structure
  * @commit_count: Number of detected commits since bootup
@@ -61,6 +65,7 @@ enum sde_fence_event {
 	SDE_FENCE_SIGNAL_ERROR
 };
 
+#ifndef OPLUS_FEATURE_DISPLAY
 /**
  * struct sde_hw_fence_data - contains the information of each display-client of the hw-fences
  *                       to communicate with the fence controller.
@@ -90,6 +95,7 @@ struct sde_hw_fence_data {
 	u64 dma_context;
 	u32 hw_fence_array_seqno;
 };
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 #if IS_ENABLED(CONFIG_SYNC_FILE)
 /**
