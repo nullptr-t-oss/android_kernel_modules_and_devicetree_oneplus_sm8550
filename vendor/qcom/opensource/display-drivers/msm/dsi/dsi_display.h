@@ -653,6 +653,8 @@ int dsi_display_set_tpg_state(struct dsi_display *display, bool enable,
 		enum dsi_test_pattern type,
 		u32 init_val,
 		enum dsi_ctrl_tpg_pattern pattern);
+int dsi_display_override_dma_cmd_trig(struct dsi_display *display,
+		enum dsi_trigger_type type);
 
 int dsi_display_clock_gate(struct dsi_display *display, bool enable);
 int dsi_dispaly_static_frame(struct dsi_display *display, bool enable);
