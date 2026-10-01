@@ -726,6 +726,7 @@ struct dsi_host_common_cfg {
 	enum dsi_te_mode te_mode;
 	enum dsi_trigger_type mdp_cmd_trigger;
 	enum dsi_trigger_type dma_cmd_trigger;
+	enum dsi_trigger_type force_dma_cmd_trigger;
 	u32 cmd_trigger_stream;
 	enum dsi_color_swap_mode swap_mode;
 	bool bit_swap_red;
