@@ -1231,7 +1231,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			rc = WRITE_QTIMER_TO_OIS(o_ctrl);
 			if (rc < 0) {
 				CAM_ERR(CAM_OIS, "Cannot update time");
-				got end;
+				goto end;
 			}
 			break;
 		}
