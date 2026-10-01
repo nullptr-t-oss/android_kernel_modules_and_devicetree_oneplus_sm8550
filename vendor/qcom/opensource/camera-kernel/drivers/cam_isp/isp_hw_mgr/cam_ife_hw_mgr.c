@@ -11803,6 +11803,7 @@ static int cam_ife_mgr_prepare_hw_update(void *hw_mgr_priv,
 	struct list_head                        *res_list_ife_rd_tmp = NULL;
 	struct cam_isp_cmd_buf_count             cmd_buf_count = {0};
 	struct cam_isp_check_io_cfg_for_scratch  check_for_scratch = {0};
+	struct cam_isp_io_buf_info          io_buf_info = {0};
 
 	if (!hw_mgr_priv || !prepare_hw_update_args) {
 		CAM_ERR(CAM_ISP, "Invalid args");
@@ -11895,7 +11896,26 @@ static int cam_ife_mgr_prepare_hw_update(void *hw_mgr_priv,
 		}
 
 		/* get IO buffers */
-		if (ctx->base[i].hw_type == CAM_ISP_HW_TYPE_VFE)
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		io_buf_info.frame_hdr = &frame_header_info;
+		io_buf_info.scratch_check_cfg = &check_for_scratch;
+		io_buf_info.prepare = prepare;
+		io_buf_info.kmd_buf_info = &prepare_hw_data->kmd_cmd_buff_info;
+		io_buf_info.iommu_hdl = hw_mgr->mgr_common.img_iommu_hdl;
+		io_buf_info.sec_iommu_hdl = hw_mgr->mgr_common.img_iommu_hdl_secure;
+		io_buf_info.base = &ctx->base[i];
+#endif /* OPLUS_FEATURE_CAMERA_COMMON */
+
+
+		if (ctx->base[i].hw_type == CAM_ISP_HW_TYPE_VFE) {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			io_buf_info.fill_fence = fill_ife_fence;
+			io_buf_info.out_base = CAM_ISP_IFE_OUT_RES_BASE;
+			io_buf_info.out_max = (CAM_ISP_IFE_OUT_RES_BASE + max_ife_out_res);
+			io_buf_info.res_list_isp_out = ctx->res_list_ife_out;
+			io_buf_info.res_list_in_rd = res_list_ife_rd_tmp;
+			rc = cam_isp_add_io_buffers(&io_buf_info);
+#else
 			rc = cam_isp_add_io_buffers(
 				hw_mgr->mgr_common.img_iommu_hdl,
 				hw_mgr->mgr_common.img_iommu_hdl_secure,
@@ -11907,7 +11927,16 @@ static int cam_ife_mgr_prepare_hw_update(void *hw_mgr_priv,
 				fill_ife_fence,
 				CAM_ISP_HW_TYPE_VFE, &frame_header_info,
 				&check_for_scratch);
-		else if (ctx->base[i].hw_type == CAM_ISP_HW_TYPE_SFE)
+#endif /* OPLUS_FEATURE_CAMERA_COMMON */
+		} else if (ctx->base[i].hw_type == CAM_ISP_HW_TYPE_SFE) {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			io_buf_info.fill_fence = fill_sfe_fence;
+			io_buf_info.out_base = CAM_ISP_SFE_OUT_RES_BASE;
+			io_buf_info.out_max = (CAM_ISP_SFE_OUT_RES_BASE + max_sfe_out_res);
+			io_buf_info.res_list_in_rd = &ctx->res_list_ife_in_rd;
+			io_buf_info.res_list_isp_out = ctx->res_list_sfe_out;
+			rc = cam_isp_add_io_buffers(&io_buf_info);
+#else
 			rc = cam_isp_add_io_buffers(
 				hw_mgr->mgr_common.img_iommu_hdl,
 				hw_mgr->mgr_common.img_iommu_hdl_secure,
@@ -11919,6 +11948,8 @@ static int cam_ife_mgr_prepare_hw_update(void *hw_mgr_priv,
 				fill_sfe_fence,
 				CAM_ISP_HW_TYPE_SFE, &frame_header_info,
 				&check_for_scratch);
+#endif /* OPLUS_FEATURE_CAMERA_COMMON */
+		}
 		if (rc) {
 			CAM_ERR(CAM_ISP,
 				"Failed in io buffers, i=%d, rc=%d hw_type=%s",
