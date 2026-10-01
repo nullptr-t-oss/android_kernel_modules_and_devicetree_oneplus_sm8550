@@ -57,6 +57,7 @@ enum cam_debug_module_id {
 	CAM_PRESIL_CORE,         /* bit 32 */
 	CAM_TPG,                 /* bit 33 */
 	CAM_DMA_FENCE,           /* bit 34 */
+	CAM_TOF,                 /* bit 35 */
 	CAM_DBG_MOD_MAX
 };
 
