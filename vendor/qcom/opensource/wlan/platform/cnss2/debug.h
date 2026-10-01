@@ -125,5 +125,6 @@ void cnss_debug_ipc_log_print(void *log_ctx, char *process, const char *fn,
 #ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
 //Add for wifi switch monitor
 void oplus_cnss_error_log_add(char *fmt, ...);
+ssize_t icnss_show_cnss_debug(struct device_driver *driver, char *buf);
 #endif  /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 #endif /* _CNSS_DEBUG_H */

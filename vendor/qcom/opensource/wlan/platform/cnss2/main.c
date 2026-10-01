@@ -5220,7 +5220,6 @@ MODULE_DEVICE_TABLE(of, cnss_of_match_table);
 //Add for wifi switch monitor
 static void icnss_create_fw_state_kobj(void);
 static void icnss_create_debug_kobj(void);
-extern ssize_t icnss_show_cnss_debug(struct device_driver *driver, char *buf);
 bool idle_shutdown = false;
 
 static ssize_t icnss_show_fw_ready(struct device_driver *driver, char *buf)

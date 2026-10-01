@@ -1190,7 +1190,7 @@ struct cel_list *cel_tail = NULL;
 int cel_list_length = 0;
 static struct mutex cel_lock;
 
-u64 oplus_conn_get_local_seconds(void)
+static u64 oplus_conn_get_local_seconds(void)
 {
 	u64 sec;
 	sec = ktime_get_seconds();
@@ -1272,7 +1272,7 @@ ssize_t icnss_show_cnss_debug(struct device_driver *driver, char *buf)
 	return length;
 }
 
-void oplus_free_cnss_error_logs(void)
+static void oplus_free_cnss_error_logs(void)
 {
 	struct cel_list *cur_cel_list;
 
