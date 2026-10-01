@@ -4199,7 +4199,11 @@ static int cam_isp_tfe_blob_update_out_resource_config(
 
 		hw_mgr_res = &ctx->res_list_tfe_out[res_id_out];
 
-	    rc = cam_isp_add_cmd_buf_update_crow(
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		rc = cam_isp_add_cmd_buf_update_crow(
+#else
+		rc = cam_isp_add_cmd_buf_update(
+#endif /* OPLUS_FEATURE_CAMERA_COMMON */
 			hw_mgr_res, blob_type,
 			CAM_ISP_HW_CMD_WM_CONFIG_UPDATE,
 			blob_info->base_info->idx,
@@ -4293,7 +4297,11 @@ static int cam_isp_tfe_blob_hfr_update(
 			total_used_bytes/4;
 		hw_mgr_res = &ctx->res_list_tfe_out[res_id_out];
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
 		rc = cam_isp_add_cmd_buf_update_crow(
+#else
+		rc = cam_isp_add_cmd_buf_update(
+#endif /* OPLUS_FEATURE_CAMERA_COMMON */
 			hw_mgr_res, blob_type, CAM_ISP_HW_CMD_GET_HFR_UPDATE,
 			blob_info->base_info->idx,
 			(void *)cmd_buf_addr,
@@ -4552,7 +4560,11 @@ static int cam_isp_tfe_blob_bw_limit_update(
 
 		hw_mgr_res = &ctx->res_list_tfe_out[res_id_out];
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
 		rc = cam_isp_add_cmd_buf_update_crow(
+#else
+		rc = cam_isp_add_cmd_buf_update(
+#endif /* OPLUS_FEATURE_CAMERA_COMMON */
 			hw_mgr_res, blob_type,
 			CAM_ISP_HW_CMD_WM_BW_LIMIT_CONFIG,
 			blob_info->base_info->idx,
