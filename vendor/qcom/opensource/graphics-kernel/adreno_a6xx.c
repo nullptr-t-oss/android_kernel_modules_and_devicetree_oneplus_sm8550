@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/clk/qcom.h>
@@ -1874,6 +1874,7 @@ int a6xx_probe_common(struct platform_device *pdev,
 	struct	adreno_device *adreno_dev, u32 chipid,
 	const struct adreno_gpu_core *gpucore)
 {
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	const struct adreno_gpudev *gpudev = gpucore->gpudev;
 	int ret;
 
@@ -1881,6 +1882,11 @@ int a6xx_probe_common(struct platform_device *pdev,
 	adreno_dev->chipid = chipid;
 
 	adreno_reg_offset_init(gpudev->reg_offsets);
+
+	if (gmu_core_isenabled(device) && (gpudev != &adreno_a6xx_rgmu_gpudev))
+		device->pwrctrl.cx_gdsc_offset = (adreno_is_a662(adreno_dev) ||
+			adreno_is_a621(adreno_dev)) ? A662_GPU_CC_CX_GDSCR :
+			A6XX_GPU_CC_CX_GDSCR;
 
 	adreno_dev->hwcg_enabled = true;
 	adreno_dev->uche_client_pf = 1;
@@ -1991,6 +1997,7 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 	struct cpu_gpu_lock *lock = ptr;
 	u32 *data = ptr + sizeof(*lock);
 	int i, offset = 0;
+	u32 pending_pairs = 2; /* No of pairs to add: <select,value> and <cntl,1> */
 
 	if (kgsl_hwlock(lock)) {
 		kgsl_hwunlock(lock);
@@ -2013,6 +2020,11 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 
 		offset += 2;
 	}
+
+	/* Ensure there is enough space in the reglist buffer for new pairs */
+	if ((offset + (pending_pairs * 2)) >=
+		(adreno_dev->pwrup_reglist->size / sizeof(u32)))
+		return -ENOSPC;
 
 	/*
 	 * For all targets A6XX_RBBM_PERFCTR_CNTL needs to be the last entry,
