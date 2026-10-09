@@ -1,0 +1,2 @@
+obj-m := oplus_sched.o
+oplus_sched-y := sch_ppq_main.o sch_ppq_class.o

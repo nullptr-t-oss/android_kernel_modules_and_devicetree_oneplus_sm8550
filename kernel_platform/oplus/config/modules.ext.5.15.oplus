@@ -12,6 +12,7 @@
 ../vendor/oplus/kernel/network/oplus_stats_calc
 ../vendor/oplus/kernel/network/data_module
 ../vendor/oplus/kernel/network/oplus_vnet
+../vendor/oplus/kernel/network/oplus_sched
 ../vendor/oplus/kernel/network/oplus_network_tuning
 ../vendor/oplus/kernel/cpu/game_opt
 ../vendor/oplus/kernel/mm/memleak_detect
