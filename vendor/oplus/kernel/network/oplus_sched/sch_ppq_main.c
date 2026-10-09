@@ -90,7 +90,10 @@ static int ppq_init(struct Qdisc *sch, struct nlattr *opt,
     if (err)
         return err;
 
-    return ppq_tune(sch, opt, extack);
+    err = ppq_tune(sch, opt, extack);
+    if (!err)
+        ppq_dbg_attach(sch);
+    return err;
 }
 
 static void ppq_reset(struct Qdisc *sch)
@@ -113,6 +116,7 @@ static void ppq_destroy(struct Qdisc *sch)
     struct ppq_sched_data *q = qdisc_priv(sch);
     int i;
 
+    ppq_dbg_detach(sch);
     qdisc_watchdog_cancel(&q->watchdog);
     tcf_block_put(q->block);
 
@@ -135,6 +139,7 @@ static struct Qdisc *ppq_classify(struct sk_buff *skb, struct Qdisc *sch,
     *qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
 
     if ((prio & TC_H_MAJ_MASK) == sch->handle) {
+        PPQ_STAT_INC(sch, cls_direct);
         idx = TC_H_MIN(prio) - 1;
     } else {
         fl = rcu_dereference_bh(q->filter_list);
@@ -149,10 +154,13 @@ static struct Qdisc *ppq_classify(struct sk_buff *skb, struct Qdisc *sch,
             return NULL;
         }
 
-        if (fl && result >= 0)
+        if (fl && result >= 0) {
+            PPQ_STAT_INC(sch, cls_filter);
             idx = TC_H_MIN(res.classid) - 1;
-        else
+        } else {
+            PPQ_STAT_INC(sch, cls_default);
             idx = q->num_classes - 1;
+        }
     }
 
     if (idx >= (unsigned int)q->num_classes)
@@ -160,6 +168,7 @@ static struct Qdisc *ppq_classify(struct sk_buff *skb, struct Qdisc *sch,
     if (idx >= PPQ_MAX_CLASSES)
         return NULL;
 
+    PPQ_STAT_INC(sch, cls_hit[idx]);
     return q->queues[idx];
 }
 
@@ -172,8 +181,12 @@ static int ppq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 
     child = ppq_classify(skb, sch, &ret);
     if (!child) {
-        if (ret & __NET_XMIT_BYPASS)
+        if (ret & __NET_XMIT_BYPASS) {
             qdisc_qstats_drop(sch);
+            PPQ_STAT_INC(sch, enq_cls_drop);
+        } else {
+            PPQ_STAT_INC(sch, enq_stolen);
+        }
         __qdisc_drop(skb, to_free);
         return ret;
     }
@@ -182,8 +195,10 @@ static int ppq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
     if (ret == NET_XMIT_SUCCESS) {
         sch->qstats.backlog += len;
         sch->q.qlen++;
+        PPQ_STAT_INC(sch, enq_ok);
         return NET_XMIT_SUCCESS;
     }
+    PPQ_STAT_INC(sch, enq_child_drop);
     if (net_xmit_drop_count(ret))
         qdisc_qstats_drop(sch);
     return ret;
@@ -206,8 +221,13 @@ static struct sk_buff *ppq_dequeue(struct Qdisc *sch)
     int i, idx;
 
     delta = ktime_to_ns(ktime_sub(now, q->last_update));
-    if (delta <= 0 || delta > q->max_burst)
+    if (delta <= 0 || delta > q->max_burst) {
+        if (delta <= 0)
+            PPQ_STAT_INC(sch, delta_nonpos);
+        else
+            PPQ_STAT_INC(sch, delta_clamped);
         delta = q->max_burst;
+    }
     q->last_update = now;
 
     /* Refill; credit is capped at 0 (no burst allowance). */
@@ -218,6 +238,8 @@ static struct sk_buff *ppq_dequeue(struct Qdisc *sch)
     skb = q->queues[0]->dequeue(q->queues[0]);
     if (skb) {
         ppq_charge(&q->prio_tokens, &q->rate_prio, skb, q->max_burst);
+        PPQ_STAT_INC(sch, deq_prio[0]);
+        PPQ_STAT_ADD(sch, bytes_prio, qdisc_pkt_len(skb));
     } else if (q->prio_tokens < 0) {
         /* Priority budget spent: fair-share round robin over all classes. */
         if (q->fair_tokens >= 0) {
@@ -228,6 +250,8 @@ static struct sk_buff *ppq_dequeue(struct Qdisc *sch)
                     q->rr_cursor = (idx + 1) % q->num_classes;
                     ppq_charge(&q->fair_tokens, &q->rate_fair, skb,
                                q->max_burst);
+                    PPQ_STAT_INC(sch, deq_fair[idx]);
+                    PPQ_STAT_ADD(sch, bytes_fair, qdisc_pkt_len(skb));
                     break;
                 }
             }
@@ -239,21 +263,33 @@ static struct sk_buff *ppq_dequeue(struct Qdisc *sch)
             if (skb) {
                 ppq_charge(&q->prio_tokens, &q->rate_prio, skb,
                            q->max_burst);
+                PPQ_STAT_INC(sch, deq_prio[i]);
+                PPQ_STAT_ADD(sch, bytes_prio, qdisc_pkt_len(skb));
                 break;
             }
         }
     }
 
     /* Wake when the least-indebted bucket recovers. */
+    PPQ_STAT_MIN(sch, min_prio_tokens, q->prio_tokens);
+    PPQ_STAT_MIN(sch, min_fair_tokens, q->fair_tokens);
+
     next = max(q->prio_tokens, q->fair_tokens);
-    if (next < 0)
+    if (next < 0) {
+        PPQ_STAT_INC(sch, wd_armed);
+        PPQ_STAT_MAX(sch, max_wd_delay_ns, -next);
         qdisc_watchdog_schedule_range_ns(&q->watchdog,
                                          ktime_to_ns(now) - next, 0);
+    }
 
     if (skb) {
         qdisc_bstats_update(sch, skb);
         qdisc_qstats_backlog_dec(sch, skb);
         sch->q.qlen--;
+    } else if (sch->q.qlen) {
+        PPQ_STAT_INC(sch, deq_gated);
+    } else {
+        PPQ_STAT_INC(sch, deq_empty);
     }
     return skb;
 }
@@ -293,14 +329,21 @@ static struct Qdisc_ops ppq_qdisc_ops __read_mostly = {
 
 static int __init ppq_module_init(void)
 {
+    int err;
+
     pr_info("ppq_module_init\n");
-    return register_qdisc(&ppq_qdisc_ops);
+    ppq_dbg_module_init();
+    err = register_qdisc(&ppq_qdisc_ops);
+    if (err)
+        ppq_dbg_module_exit();
+    return err;
 }
 
 static void __exit ppq_module_exit(void)
 {
     pr_info("ppq_module_exit\n");
     unregister_qdisc(&ppq_qdisc_ops);
+    ppq_dbg_module_exit();
 }
 
 module_init(ppq_module_init);
