@@ -1,319 +1,309 @@
 #include "sch_ppq.h"
 
-static int ppq_init(struct Qdisc *sch, struct nlattr *opt, 
+static int ppq_tune(struct Qdisc *sch, struct nlattr *opt,
                     struct netlink_ext_ack *extack)
 {
-    struct ppq_sched_data *priv = qdisc_priv(sch);
-    struct ppq_tc_opt opt_00;
+    struct ppq_sched_data *q = qdisc_priv(sch);
+    struct tc_ratespec conf = { .linklayer = TC_LINKLAYER_ETHERNET };
+    struct Qdisc *qs[PPQ_MAX_CLASSES] = { NULL };
+    struct ppq_tc_opt *ctl;
+    int old_classes, new_classes, i;
+    u32 rate;
+
+    if (!opt || nla_len(opt) < sizeof(*ctl))
+        return -EINVAL;
+
+    ctl = nla_data(opt);
+    new_classes = ctl->classes;
+    rate = ctl->rate;
+    if (new_classes < 1 || new_classes > PPQ_MAX_CLASSES)
+        return -EINVAL;
+
+    old_classes = q->num_classes;
+
+    /* Allocate new children before taking the lock. */
+    for (i = old_classes; i < new_classes; i++) {
+        qs[i] = qdisc_create_dflt(sch->dev_queue, &pfifo_qdisc_ops,
+                                  TC_H_MAKE(sch->handle, i + 1), extack);
+        if (!qs[i]) {
+            while (--i >= old_classes)
+                qdisc_put(qs[i]);
+            return -ENOMEM;
+        }
+    }
+
+    sch_tree_lock(sch);
+
+    q->num_classes = new_classes;
+    q->rate_limit = rate;
+    psched_ratecfg_precompute(&q->rate_fair, &conf, rate / 10);
+    psched_ratecfg_precompute(&q->rate_prio, &conf, rate - rate / 10);
+    q->prio_tokens = 0;
+    q->fair_tokens = 0;
+    q->max_burst = PPQ_MAX_BURST_NS;
+    q->last_update = ktime_get();
+    q->rr_cursor = 0;
+
+    /* Shrinking: detach the dropped children. */
+    for (i = new_classes; i < old_classes; i++) {
+        struct Qdisc *c = q->queues[i];
+        u32 qlen, backlog;
+
+        qs[i] = c;
+        q->queues[i] = NULL;
+        if (c) {
+            qdisc_qstats_qlen_backlog(c, &qlen, &backlog);
+            qdisc_tree_reduce_backlog(c, qlen, backlog);
+        }
+    }
+
+    /* Growing: install the new children. */
+    for (i = old_classes; i < new_classes; i++) {
+        q->queues[i] = qs[i];
+        if (qs[i] != &noop_qdisc)
+            qdisc_hash_add(qs[i], true);
+    }
+
+    sch_tree_unlock(sch);
+
+    /* Put detached children outside the lock. */
+    for (i = new_classes; i < old_classes; i++) {
+        if (qs[i])
+            qdisc_put(qs[i]);
+    }
+
+    return 0;
+}
+
+static int ppq_init(struct Qdisc *sch, struct nlattr *opt,
+                    struct netlink_ext_ack *extack)
+{
+    struct ppq_sched_data *q = qdisc_priv(sch);
     int err;
 
-    qdisc_watchdog_init(&priv->watchdog, sch);
+    qdisc_watchdog_init(&q->watchdog, sch);
 
     if (!opt)
         return -EINVAL;
 
-    err = tcf_block_get(&priv->block, &priv->filter_list, sch, extack);
-    if (err == 0) {
-        opt_00.rate = nla_get_u32(opt);
-        err = ppq_tune(sch, &opt_00, extack);
+    err = tcf_block_get(&q->block, &q->filter_list, sch, extack);
+    if (err)
+        return err;
+
+    return ppq_tune(sch, opt, extack);
+}
+
+static void ppq_reset(struct Qdisc *sch)
+{
+    struct ppq_sched_data *q = qdisc_priv(sch);
+    int i;
+
+    qdisc_watchdog_cancel(&q->watchdog);
+    for (i = 0; i < q->num_classes; i++) {
+        if (q->queues[i])
+            qdisc_reset(q->queues[i]);
     }
-    
-    return err;
+    /* The vendor binary skips this; sch_prio does it. */
+    sch->qstats.backlog = 0;
+    sch->q.qlen = 0;
 }
 
 static void ppq_destroy(struct Qdisc *sch)
 {
-    struct ppq_sched_data *priv = qdisc_priv(sch);
+    struct ppq_sched_data *q = qdisc_priv(sch);
     int i;
 
-    qdisc_watchdog_cancel(&priv->watchdog);
-    tcf_block_put(priv->block);
+    qdisc_watchdog_cancel(&q->watchdog);
+    tcf_block_put(q->block);
 
-    for (i = 0; i < priv->num_classes; i++) {
-        if (i < 16 && priv->queues[i])
-            qdisc_put(priv->queues[i]);
+    for (i = 0; i < q->num_classes; i++) {
+        if (q->queues[i])
+            qdisc_put(q->queues[i]);
     }
 }
 
-static int ppq_tune(struct Qdisc *sch, struct nlattr *opt, struct netlink_ext_ack *extack)
+static struct Qdisc *ppq_classify(struct sk_buff *skb, struct Qdisc *sch,
+                                  int *qerr)
 {
-    struct ppq_sched_data *priv = qdisc_priv(sch);
-    struct ppq_tc_opt *user_opt;
-    struct Qdisc *temp_queues[16] = { NULL };
-    int old_classes, new_classes;
-    u32 rate;
-    int i, err = 0;
-    struct psched_ratespec p_rate = { .rate = 0 };
+    struct ppq_sched_data *q = qdisc_priv(sch);
+    u32 prio = skb->priority;
+    struct tcf_result res = {};
+    struct tcf_proto *fl;
+    unsigned int idx;
+    int result;
 
-    if (!opt)
-        return -EINVAL;
+    *qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
 
-    user_opt = nla_data(opt);
-    if (nla_len(opt) < sizeof(*user_opt))
-        return -EINVAL;
-
-    new_classes = user_opt->classes;
-    if (new_classes <= 0 || new_classes > 16)
-        return -EINVAL;
-
-    rate = user_opt->rate;
-    old_classes = priv->num_classes;
-
-    if (old_classes < new_classes) {
-        for (i = old_classes; i < new_classes; i++) {
-            struct Qdisc *q;
-            q = qdisc_create_dflt(sch->dev_queue, &pfifo_qdisc_ops,
-                                  TC_H_MAKE(sch->handle, i + 1), extack);
-            if (!q) {
-                err = -ENOMEM;
-                goto rollback;
-            }
-            temp_queues[i] = q;
-        }
-    }
-
-    if (!(sch->flags & TCQ_F_INGRESS)) {
-        struct Qdisc *root = qdisc_root_sleeping(sch);
-        ASSERT_RTNL();
-        spin_lock_bh(qdisc_lock(root));
+    if ((prio & TC_H_MAJ_MASK) == sch->handle) {
+        idx = TC_H_MIN(prio) - 1;
     } else {
-        spin_lock_bh(&sch->q.lock);
-    }
-
-    priv->num_classes = new_classes;
-    priv->rate_limit = (u64)rate;
-
-    p_rate.rate = rate;
-    psched_ratecfg_precompute(&priv->rate_2, &p_rate, rate / 10);
-    psched_ratecfg_precompute(&priv->rate_1, &p_rate, rate - (rate / 10));
-
-    priv->bytes_sent = 0;
-    priv->tokens = 0;
-    priv->max_burst = 2000000000;
-    priv->last_update_time = ktime_get();
-
-    if (new_classes < old_classes) {
-        for (i = new_classes; i < old_classes; i++) {
-            struct Qdisc *q = priv->queues[i];
-            if (q) {
-                struct gnet_stats_queue qstats;
-                qdisc_qstats_qlen_backlog(q, &qstats.qlen, &qstats.backlog);
-                qdisc_tree_reduce_backlog(q, qstats.qlen, qstats.backlog);
-            }
-        }
-    }
-
-    if (old_classes < new_classes) {
-        for (i = old_classes; i < new_classes; i++) {
-            if (temp_queues[i]) {
-                priv->queues[i] = temp_queues[i];
-                if (temp_queues[i] != &noop_qdisc)
-                    qdisc_hash_add(temp_queues[i], true);
-            }
-        }
-    }
-
-    if (!(sch->flags & TCQ_F_INGRESS)) {
-        struct Qdisc *root = qdisc_root_sleeping(sch);
-        spin_unlock_bh(qdisc_lock(root));
-    } else {
-        spin_unlock_bh(&sch->q.lock);
-    }
-
-    if (new_classes < old_classes) {
-        for (i = new_classes; i < old_classes; i++) {
-            qdisc_put(priv->queues[i]);
-            priv->queues[i] = NULL;
-        }
-    }
-
-    return 0;
-
-rollback:
-    for (i = 0; i < 16; i++) {
-        if (temp_queues[i])
-            qdisc_put(temp_queues[i]);
-    }
-    return err;
-}
-
-static int ppq_enqueue(struct sk_buff *skb, struct Qdisc *sch, struct sk_buff **to_free)
-{
-    struct ppq_sched_data *priv = qdisc_priv(sch);
-    unsigned int cls_idx;
-    int err;
-    int pkt_len = qdisc_pkt_len(skb);
-
-    if ((skb->priority & 0xffff0000) == sch->handle) {
-        cls_idx = (skb->priority & 0xffff) - 1;
-        if (cls_idx >= priv->num_classes)
-            cls_idx = priv->num_classes - 1;
-        
-        if (cls_idx >= 16)
-            goto drop_pkt;
-
-        struct Qdisc *target_q = priv->queues[cls_idx];
-        if (target_q) {
-            err = qdisc_enqueue(skb, target_q, to_free);
-            if (err == NET_XMIT_SUCCESS) {
-                sch->qstats.backlog += pkt_len;
-                sch->q.qlen++;
-            } else if (!net_xmit_drop_count(err)) {
-                sch->qstats.drops++;
-            }
-            return err;
-        }
-        goto drop_pkt;
-    } else {
-        struct tcf_result res;
-        int result = tcf_classify(skb, priv->filter_list, &res, false);
+        fl = rcu_dereference_bh(q->filter_list);
+        result = tcf_classify(skb, NULL, fl, &res, false);
         switch (result) {
-        case TC_ACT_OK:
-        case TC_ACT_RECLASSIFY:
-            if (res.classid) {
-                cls_idx = (res.classid & 0xffff) - 1;
-                if (cls_idx < priv->num_classes) {
-                    struct Qdisc *target_q = priv->queues[cls_idx];
-                    if (target_q) {
-                        err = qdisc_enqueue(skb, target_q, to_free);
-                        if (err == NET_XMIT_SUCCESS) {
-                            sch->qstats.backlog += pkt_len;
-                            sch->q.qlen++;
-                        } else if (!net_xmit_drop_count(err)) {
-                            sch->qstats.drops++;
-                        }
-                        return err;
-                    }
-                }
-            }
-            cls_idx = priv->num_classes - 1;
-            break;
+        case TC_ACT_STOLEN:
+        case TC_ACT_QUEUED:
+        case TC_ACT_TRAP:
+            *qerr = NET_XMIT_SUCCESS | __NET_XMIT_STOLEN;
+            fallthrough;
         case TC_ACT_SHOT:
-            goto drop_pkt;
-        default:
-            cls_idx = priv->num_classes - 1;
-            break;
+            return NULL;
         }
 
-        if (cls_idx < priv->num_classes && priv->queues[cls_idx]) {
-            err = qdisc_enqueue(skb, priv->queues[cls_idx], to_free);
-            if (err == NET_XMIT_SUCCESS) {
-                sch->qstats.backlog += pkt_len;
-                sch->q.qlen++;
-            } else if (!net_xmit_drop_count(err)) {
-                sch->qstats.drops++;
-            }
-            return err;
-        }
+        if (fl && result >= 0)
+            idx = TC_H_MIN(res.classid) - 1;
+        else
+            idx = q->num_classes - 1;
     }
 
-drop_pkt:
-    sch->qstats.drops++;
-    __qdisc_drop(skb, to_free);
-    return NET_XMIT_DROP;
+    if (idx >= (unsigned int)q->num_classes)
+        idx = q->num_classes - 1;
+    if (idx >= PPQ_MAX_CLASSES)
+        return NULL;
+
+    return q->queues[idx];
+}
+
+static int ppq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+                       struct sk_buff **to_free)
+{
+    unsigned int len = qdisc_pkt_len(skb);
+    struct Qdisc *child;
+    int ret;
+
+    child = ppq_classify(skb, sch, &ret);
+    if (!child) {
+        if (ret & __NET_XMIT_BYPASS)
+            qdisc_qstats_drop(sch);
+        __qdisc_drop(skb, to_free);
+        return ret;
+    }
+
+    ret = qdisc_enqueue(skb, child, to_free);
+    if (ret == NET_XMIT_SUCCESS) {
+        sch->qstats.backlog += len;
+        sch->q.qlen++;
+        return NET_XMIT_SUCCESS;
+    }
+    if (net_xmit_drop_count(ret))
+        qdisc_qstats_drop(sch);
+    return ret;
+}
+
+static void ppq_charge(s64 *tokens, const struct psched_ratecfg *r,
+                       const struct sk_buff *skb, s64 max_burst)
+{
+    *tokens -= psched_l2t_ns(r, qdisc_pkt_len(skb));
+    if (*tokens < -max_burst)
+        *tokens = 1 - max_burst;
 }
 
 static struct sk_buff *ppq_dequeue(struct Qdisc *sch)
 {
-    struct ppq_sched_data *priv = qdisc_priv(sch);
+    struct ppq_sched_data *q = qdisc_priv(sch);
     ktime_t now = ktime_get();
-    s64 delta = ktime_to_ns(ktime_sub(now, priv->last_update_time));
-    struct sk_buff *skb = NULL;
-    int i;
+    struct sk_buff *skb;
+    s64 delta, next;
+    int i, idx;
 
-    if (delta <= 0)
-        delta = priv->max_burst;
-    else if (delta > priv->max_burst)
-        delta = priv->max_burst;
+    delta = ktime_to_ns(ktime_sub(now, q->last_update));
+    if (delta <= 0 || delta > q->max_burst)
+        delta = q->max_burst;
+    q->last_update = now;
 
-    priv->last_update_time = now;
-    
-    // Token updates based on bandwidth limits
-    priv->bytes_sent += delta;
-    priv->tokens += delta;
+    /* Refill; credit is capped at 0 (no burst allowance). */
+    q->prio_tokens = min_t(s64, q->prio_tokens + delta, 0);
+    q->fair_tokens = min_t(s64, q->fair_tokens + delta, 0);
 
-    if (priv->queues[0]) {
-        skb = priv->queues[0]->dequeue(priv->queues[0]);
-    }
-
+    /* Class 0 is always tried first and is never gated, only accounted. */
+    skb = q->queues[0]->dequeue(q->queues[0]);
     if (skb) {
-        unsigned int len = qdisc_pkt_len(skb) + priv->rate_1.overhead;
-        if (len < priv->rate_1.mpu)
-            len = priv->rate_1.mpu;
-        priv->bytes_sent -= (priv->rate_1.mult * len) >> priv->rate_1.shift;
-    } else if ((s64)priv->bytes_sent < 0) {
-        for (i = 0; i < priv->num_classes; i++) {
-            struct Qdisc *q = priv->queues[i];
-            if (q) {
-                skb = q->dequeue(q);
+        ppq_charge(&q->prio_tokens, &q->rate_prio, skb, q->max_burst);
+    } else if (q->prio_tokens < 0) {
+        /* Priority budget spent: fair-share round robin over all classes. */
+        if (q->fair_tokens >= 0) {
+            for (i = 0; i < q->num_classes; i++) {
+                idx = (q->rr_cursor + i) % q->num_classes;
+                skb = q->queues[idx]->dequeue(q->queues[idx]);
                 if (skb) {
-                    unsigned int len = qdisc_pkt_len(skb) + priv->rate_2.overhead;
-                    if (len < priv->rate_2.mpu)
-                        len = priv->rate_2.mpu;
-                    priv->tokens -= (priv->rate_2.mult * len) >> priv->rate_2.shift;
+                    q->rr_cursor = (idx + 1) % q->num_classes;
+                    ppq_charge(&q->fair_tokens, &q->rate_fair, skb,
+                               q->max_burst);
                     break;
                 }
             }
         }
+    } else {
+        /* Priority budget available: strict priority over classes 1..n-1. */
+        for (i = 1; i < q->num_classes; i++) {
+            skb = q->queues[i]->dequeue(q->queues[i]);
+            if (skb) {
+                ppq_charge(&q->prio_tokens, &q->rate_prio, skb,
+                           q->max_burst);
+                break;
+            }
+        }
     }
+
+    /* Wake when the least-indebted bucket recovers. */
+    next = max(q->prio_tokens, q->fair_tokens);
+    if (next < 0)
+        qdisc_watchdog_schedule_range_ns(&q->watchdog,
+                                         ktime_to_ns(now) - next, 0);
 
     if (skb) {
-        sch->bstats.bytes += qdisc_pkt_len(skb);
-        sch->bstats.packets++;
-        sch->qstats.backlog -= qdisc_pkt_len(skb);
+        qdisc_bstats_update(sch, skb);
+        qdisc_qstats_backlog_dec(sch, skb);
         sch->q.qlen--;
-    } else {
-        qdisc_watchdog_schedule_range_ns(&priv->watchdog, ktime_to_ns(now) + 1000000, 0);
     }
-
     return skb;
 }
 
 static int ppq_dump(struct Qdisc *sch, struct sk_buff *skb)
 {
-    struct ppq_sched_data *priv = qdisc_priv(sch);
+    struct ppq_sched_data *q = qdisc_priv(sch);
+    unsigned char *b = skb_tail_pointer(skb);
     struct ppq_tc_opt opt = {
-        .flags = 0,
-        .classes = priv->num_classes,
-        .rate = (u32)priv->rate_limit
+        .classes = q->num_classes,
+        .rate = (u32)q->rate_limit,
     };
 
     if (nla_put(skb, TCA_OPTIONS, sizeof(opt), &opt))
         goto nla_put_failure;
-
     return skb->len;
 
 nla_put_failure:
+    nlmsg_trim(skb, b);
     return -1;
 }
 
 static struct Qdisc_ops ppq_qdisc_ops __read_mostly = {
-    .cl_ops         = &ppq_class_ops,
-    .id             = "ppq",
-    .priv_size      = sizeof(struct ppq_sched_data),
-    .enqueue        = ppq_enqueue,
-    .dequeue        = ppq_dequeue,
-    .peek           = qdisc_peek_dequeued,
-    .init           = ppq_init,
-    .reset          = ppq_reset,
-    .destroy        = ppq_destroy,
-    .change         = ppq_tune,
-    .dump           = ppq_dump,
-    .owner          = THIS_MODULE,
+    .cl_ops     = &ppq_class_ops,
+    .id         = "ppq",
+    .priv_size  = sizeof(struct ppq_sched_data),
+    .enqueue    = ppq_enqueue,
+    .dequeue    = ppq_dequeue,
+    .peek       = qdisc_peek_dequeued,
+    .init       = ppq_init,
+    .reset      = ppq_reset,
+    .destroy    = ppq_destroy,
+    .change     = ppq_tune,
+    .dump       = ppq_dump,
+    .owner      = THIS_MODULE,
 };
 
 static int __init ppq_module_init(void)
 {
-    pr_info("ppq_module_init");
+    pr_info("ppq_module_init\n");
     return register_qdisc(&ppq_qdisc_ops);
 }
 
 static void __exit ppq_module_exit(void)
 {
-    pr_info("ppq_module_exit");
+    pr_info("ppq_module_exit\n");
     unregister_qdisc(&ppq_qdisc_ops);
 }
 
 module_init(ppq_module_init);
 module_exit(ppq_module_exit);
+MODULE_ALIAS_NET_SCH("ppq");
 MODULE_LICENSE("GPL");

@@ -3,39 +3,37 @@
 
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/ktime.h>
 #include <net/sch_generic.h>
 #include <net/pkt_sched.h>
+#include <net/pkt_cls.h>
 #include <net/netlink.h>
 
-/* Netlink configuration payload mapped from userspace */
+#define PPQ_MAX_CLASSES   16
+#define PPQ_MAX_BURST_NS  2000000000LL
+
+/* TCA_OPTIONS payload. 8 bytes on the wire: {classes, rate}. */
 struct ppq_tc_opt {
-    u32 flags;
     u32 classes;
     u32 rate;
 };
 
-/* The 344-byte private data structure mapped from the binary 
- * Note: this struct was fully re'd
- */
 struct ppq_sched_data {
     struct tcf_block *block;
-    u32 num_classes;
+    struct tcf_proto __rcu *filter_list;
+    int num_classes;                    /* 1..16 */
     u64 rate_limit;
-    struct psched_ratecfg rate_1;
-    struct psched_ratecfg rate_2;
-    u64 bytes_sent;
-    u64 tokens;
-    u64 max_burst;
-    ktime_t last_update_time;
+    struct psched_ratecfg rate_prio;    /* rate - rate/10 */
+    struct psched_ratecfg rate_fair;    /* rate/10 */
+    s64 prio_tokens;                    /* ns credit, <= 0 */
+    s64 fair_tokens;                    /* ns credit, <= 0 */
+    s64 max_burst;
+    ktime_t last_update;
+    int rr_cursor;                      /* fair-share round robin position */
+    struct Qdisc *queues[PPQ_MAX_CLASSES];
     struct qdisc_watchdog watchdog;
-    struct Qdisc *queues[16]; /* 1-indexed classes mapped to 0-15 */
-    u32 last_polled_queue;
 };
 
-/* External declarations for class operations */
 extern const struct Qdisc_class_ops ppq_class_ops;
-
-/* Prototypes for shared functions */
-void ppq_reset(struct Qdisc *sch);
 
 #endif /* _SCH_PPQ_H */
