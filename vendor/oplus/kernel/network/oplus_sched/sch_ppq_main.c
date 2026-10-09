@@ -305,5 +305,5 @@ static void __exit ppq_module_exit(void)
 
 module_init(ppq_module_init);
 module_exit(ppq_module_exit);
-MODULE_ALIAS_NET_SCH("ppq");
+MODULE_ALIAS("sch_ppq");
 MODULE_LICENSE("GPL");
