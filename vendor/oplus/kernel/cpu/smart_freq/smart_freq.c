@@ -69,8 +69,8 @@ static int arch_get_nr_clusters(void)
 	for_each_possible_cpu(cpu) {
 		struct cpu_topology *cpu_topo = &cpu_topology[cpu];
 
-		if (cpu_topo->cluster_id > max_id)
-			max_id = cpu_topo->cluster_id;
+		if (cpu_topo->package_id > max_id)
+			max_id = cpu_topo->package_id;
 	}
 	__arch_nr_clusters = max_id + 1;
 	return __arch_nr_clusters;
@@ -102,7 +102,7 @@ static void arch_get_cluster_cpus(struct cpumask *cpus, int cluster_id)
 	for_each_possible_cpu(cpu) {
 		struct cpu_topology *cpu_topo = &cpu_topology[cpu];
 
-		if (cpu_topo->cluster_id == cluster_id)
+		if (cpu_topo->package_id == cluster_id)
 			cpumask_set_cpu(cpu, cpus);
 	}
 }
@@ -111,7 +111,7 @@ static void arch_get_cluster_cpus(struct cpumask *cpus, int cluster_id)
 static unsigned int get_cluster_ipc_level_freq(int curr_cpu, u64 time)
 {
 	int cpu = 0, winning_cpu = 0, cpu_ipc_level = 0, index = 0;
-	int cluster_id = topology_cluster_id(curr_cpu);
+	int cluster_id = topology_physical_package_id(curr_cpu);
 
 	if (!smart_freq_init_done || !smart_freq_enable)
 		return MAX_FREQ;
@@ -150,7 +150,7 @@ void smart_freq_update(unsigned int cpu, u64 time, unsigned int flags)
 	if (!smart_freq_init_done || !smart_freq_enable)
 		return;
 
-	cluster_id = topology_cluster_id(cpu);
+	cluster_id = topology_physical_package_id(cpu);
 	if (flags & CPUFREQ_SMART_FREQ_BIT)
 		smart_freq_info[cluster_id].cluster_freq =
 				get_cluster_ipc_level_freq(cpu, time);
@@ -168,7 +168,7 @@ unsigned int smart_freq_update_final_freq(struct cpumask *cpumask, unsigned int 
 	if (!cpumask || !smart_freq_init_done || !smart_freq_enable)
 		return freq;
 
-	cluster_id = topology_cluster_id(cpumask_first(cpumask));
+	cluster_id = topology_physical_package_id(cpumask_first(cpumask));
 	if (cluster_id == 0)
 		return freq;
 
@@ -183,14 +183,14 @@ EXPORT_SYMBOL(smart_freq_update_final_freq);
 
 static unsigned long smart_freq_calculate_ipc(int cpu, int cluster_id)
 {
-	/* prevent kernel panic if firmware blocks AMU */
-	if (!cpus_have_const_cap(ARM64_HAS_AMU_EXTN))
-		return 0;
-
 	unsigned long ipc = 0;
 	u64 amu_cnt, delta_cycl = 0, delta_intr = 0;
 	u64 prev_cycl_cnt = per_cpu(cycle_cnt, cpu);
 	u64 prev_intr_cnt = per_cpu(intr_cnt, cpu);
+
+	/* prevent kernel panic if firmware blocks AMU */
+	if (!cpus_have_const_cap(ARM64_HAS_AMU_EXTN))
+		return 0;
 
 
 	amu_cnt = read_sysreg_s(SYS_AMEVCNTR0_CORE_EL0);
@@ -231,7 +231,7 @@ static void smart_freq_sched_tick(void *data, struct rq *rq)
 		return;
 
 	/* IPC based smart FMAX */
-	cluster_id = topology_cluster_id(cpu);
+	cluster_id = topology_physical_package_id(cpu);
 	max_ipc_count = hweight32(smart_freq_info[cluster_id].smart_freq_ipc_participation_mask);
 	if (smart_freq_info[cluster_id].smart_freq_ipc_participation_mask & IPC_PARTICIPATION) {
 		last_ipc_level = per_cpu(ipc_level, cpu);
@@ -329,7 +329,7 @@ done:
 }
 
 
-static int sched_smart_freq_ipc_handler(const struct ctl_table *table, int write,
+static int sched_smart_freq_ipc_handler(struct ctl_table *table, int write,
 			void  *buffer, unsigned long  *lenp,
 			long long *ppos)
 {

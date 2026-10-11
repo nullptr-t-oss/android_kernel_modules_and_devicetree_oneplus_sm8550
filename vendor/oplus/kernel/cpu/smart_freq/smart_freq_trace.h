@@ -79,7 +79,7 @@ TRACE_EVENT(ipc_update,
 #endif	/*_TRACE_SMART_FREQ_H */
 
 #undef TRACE_INCLUDE_PATH
-#define TRACE_INCLUDE_PATH smart_freq
+#define TRACE_INCLUDE_PATH .
 
 #undef TRACE_INCLUDE_FILE
 #define TRACE_INCLUDE_FILE smart_freq_trace

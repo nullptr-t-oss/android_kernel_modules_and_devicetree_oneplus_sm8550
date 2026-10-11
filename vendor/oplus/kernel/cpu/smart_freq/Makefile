@@ -3,5 +3,6 @@
 
 GCOV_PROFILE := y
 LINUXINCLUDE += -I$(srctree)/
+ccflags-y += -I$(srctree)/$(src)
 obj-$(CONFIG_OPLUS_FEATURE_SMART_FREQ) += oplus_bsp_smart_freq.o
 oplus_bsp_smart_freq-y := smart_freq.o
