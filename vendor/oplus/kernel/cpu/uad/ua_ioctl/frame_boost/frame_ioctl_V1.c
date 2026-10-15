@@ -140,6 +140,10 @@ static long ofb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		/* App which is not our frame boost target may request frame vsync(like systemui),
 		 * just ignore hint from them! Return zero to avoid too many androd error log
 		 */
+		/* diagnostic: which stages past 216 does userspace send? (6.1 added 218/219 for close loop) */
+		if (data.stage >= 217)
+			trace_printk("ofb_diag: stage=%d pid=%d tid=%d cur=%d\n", data.stage, data.pid, data.tid, current->pid);
+
 		if ((data.pid != current->tgid) ||
 				((data.pid != get_frame_group_ui(DEFAULT_FRAME_GROUP_ID)) &&
 				 (data.pid != get_frame_group_ui(INPUTMETHOD_FRAME_GROUP_ID))))
