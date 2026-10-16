@@ -16,6 +16,47 @@
 #include "../frame_ioctl.h"
 #include "../ua_ioctl_common.h"
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
+#include <linux/module.h>
+#include <../kernel/oplus_cpu/close_loop/close_loop.h>
+
+/*
+ * close_loop is a separate module. Look its entry points up at call time so that a
+ * missing or late-loading close_loop never stops this module (frame and touch ioctl)
+ * from loading.
+ */
+static void ofb_cl_chk_td_period(bool from_app)
+{
+	void (*fn)(bool) = symbol_get(cl_chk_td_period);
+
+	if (fn) {
+		fn(from_app);
+		symbol_put(cl_chk_td_period);
+	}
+}
+
+static void ofb_cl_enq_update(int pid)
+{
+	void (*fn)(int) = symbol_get(cl_enq_update);
+
+	if (fn) {
+		fn(pid);
+		symbol_put(cl_enq_update);
+	}
+}
+
+static void ofb_cl_chk_margin(int pid)
+{
+	void (*fn)(int) = symbol_get(cl_chk_margin);
+
+	if (fn) {
+		fn(pid);
+		symbol_put(cl_chk_margin);
+	}
+}
+#endif
+
+
 #define FRAMEBOOST_PROC_NODE "oplus_frame_boost"
 #define INVALID_VAL (INT_MIN)
 
@@ -99,12 +140,29 @@ static long ofb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (data.stage >= 217)
 			trace_printk("ofb_diag: stage=%d pid=%d tid=%d cur=%d\n", data.stage, data.pid, data.tid, current->pid);
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
+		/* vsync notified to the app (sent by SurfaceFlinger's TimerDispatch) */
+		if (data.stage == BOOST_TD_APP_NOTIFY) {
+			ofb_cl_chk_td_period(true);
+			return 0;
+		}
+
+		/* app render thread queued its buffer */
+		if (data.stage == BOOST_RT_QBUF_END)
+			ofb_cl_enq_update(data.pid);
+#endif
+
 		if ((data.pid != current->pid) && (data.tid != current->pid))
 				return ret;
 
 		grp_id = task_get_frame_group_id(data.pid);
 		if (grp_id <= 0)
 			return grp_id;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
+		if (data.stage == BOOST_RT_QBUF_END)
+			ofb_cl_chk_margin(data.pid);
+#endif
 
 		if (data.stage == BOOST_FRAME_START) {
 #ifdef CONFIG_ARCH_MEDIATEK
