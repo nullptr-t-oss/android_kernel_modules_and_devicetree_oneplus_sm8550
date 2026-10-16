@@ -1998,6 +1998,8 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 	u32 *data = ptr + sizeof(*lock);
 	int i, offset = 0;
 	u32 pending_pairs = 2; /* No of pairs to add: <select,value> and <cntl,1> */
+	u64 reglist_size_dwords = adreno_dev->pwrup_reglist->size / sizeof(u32);
+	u64 lock_size_dwords = sizeof(*lock) / sizeof(u32);
 
 	if (kgsl_hwlock(lock)) {
 		kgsl_hwunlock(lock);
@@ -2022,9 +2024,11 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 	}
 
 	/* Ensure there is enough space in the reglist buffer for new pairs */
-	if ((offset + (pending_pairs * 2)) >=
-		(adreno_dev->pwrup_reglist->size / sizeof(u32)))
+	if ((offset + (pending_pairs * 2) + lock_size_dwords) >=
+		reglist_size_dwords) {
+		kgsl_hwunlock(lock);
 		return -ENOSPC;
+	}
 
 	/*
 	 * For all targets A6XX_RBBM_PERFCTR_CNTL needs to be the last entry,
@@ -2034,7 +2038,7 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 
 	data[offset] = reg->select;
 	data[offset + 1] = reg->countable;
-	data[offset + 2] = A6XX_RBBM_PERFCTR_CNTL,
+	data[offset + 2] = A6XX_RBBM_PERFCTR_CNTL;
 	data[offset + 3] = 1;
 
 	lock->list_length += 2;
