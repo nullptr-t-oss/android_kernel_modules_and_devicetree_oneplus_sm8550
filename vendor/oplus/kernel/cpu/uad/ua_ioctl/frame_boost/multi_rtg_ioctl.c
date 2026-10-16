@@ -16,6 +16,24 @@
 #include "../frame_ioctl.h"
 #include "../ua_ioctl_common.h"
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
+#include <linux/module.h>
+#include <../kernel/oplus_cpu/close_loop/close_loop.h>
+
+/*
+ * Set by oplus_bsp_close_loop when it loads. This module never links against close_loop,
+ * so a missing or late-loading close_loop cannot stop the frame/touch ioctl from loading.
+ */
+static const struct ofb_cl_ops *ofb_cl;
+
+void ofb_cl_register_ops(const struct ofb_cl_ops *ops)
+{
+	WRITE_ONCE(ofb_cl, ops);
+}
+EXPORT_SYMBOL_GPL(ofb_cl_register_ops);
+#endif
+
+
 #define FRAMEBOOST_PROC_NODE "oplus_frame_boost"
 #define INVALID_VAL (INT_MIN)
 
@@ -95,12 +113,42 @@ static long ofb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		 * just ignore hint from them! Return zero to avoid too many androd error log
 		 */
 
+		/* diagnostic: which stages past 216 does userspace send? (6.1 added 218/219 for close loop) */
+		if (data.stage >= 217)
+			trace_printk("ofb_diag: stage=%d pid=%d tid=%d cur=%d\n", data.stage, data.pid, data.tid, current->pid);
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
+		{
+			const struct ofb_cl_ops *cl = READ_ONCE(ofb_cl);
+
+			/* vsync notified to the app (sent by SurfaceFlinger's TimerDispatch) */
+			if (data.stage == BOOST_TD_APP_NOTIFY) {
+				if (cl)
+					cl->chk_td_period(true);
+				return 0;
+			}
+
+			/* app render thread queued its buffer */
+			if (data.stage == BOOST_RT_QBUF_END && cl)
+				cl->enq_update(data.pid);
+		}
+#endif
+
 		if ((data.pid != current->pid) && (data.tid != current->pid))
 				return ret;
 
 		grp_id = task_get_frame_group_id(data.pid);
 		if (grp_id <= 0)
 			return grp_id;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
+		if (data.stage == BOOST_RT_QBUF_END) {
+			const struct ofb_cl_ops *cl = READ_ONCE(ofb_cl);
+
+			if (cl)
+				cl->chk_margin(data.pid);
+		}
+#endif
 
 		if (data.stage == BOOST_FRAME_START) {
 #ifdef CONFIG_ARCH_MEDIATEK
