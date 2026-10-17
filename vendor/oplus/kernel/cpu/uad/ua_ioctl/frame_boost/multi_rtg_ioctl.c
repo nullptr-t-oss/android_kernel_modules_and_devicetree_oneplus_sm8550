@@ -21,39 +21,16 @@
 #include <../kernel/oplus_cpu/close_loop/close_loop.h>
 
 /*
- * close_loop is a separate module. Look its entry points up at call time so that a
- * missing or late-loading close_loop never stops this module (frame and touch ioctl)
- * from loading.
+ * Set by oplus_bsp_close_loop when it loads. This module never links against close_loop,
+ * so a missing or late-loading close_loop cannot stop the frame/touch ioctl from loading.
  */
-static void ofb_cl_chk_td_period(bool from_app)
+static const struct ofb_cl_ops *ofb_cl;
+
+void ofb_cl_register_ops(const struct ofb_cl_ops *ops)
 {
-	void (*fn)(bool) = symbol_get(cl_chk_td_period);
-
-	if (fn) {
-		fn(from_app);
-		symbol_put(cl_chk_td_period);
-	}
+	WRITE_ONCE(ofb_cl, ops);
 }
-
-static void ofb_cl_enq_update(int pid)
-{
-	void (*fn)(int) = symbol_get(cl_enq_update);
-
-	if (fn) {
-		fn(pid);
-		symbol_put(cl_enq_update);
-	}
-}
-
-static void ofb_cl_chk_margin(int pid)
-{
-	void (*fn)(int) = symbol_get(cl_chk_margin);
-
-	if (fn) {
-		fn(pid);
-		symbol_put(cl_chk_margin);
-	}
-}
+EXPORT_SYMBOL_GPL(ofb_cl_register_ops);
 #endif
 
 
@@ -141,15 +118,20 @@ static long ofb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			trace_printk("ofb_diag: stage=%d pid=%d tid=%d cur=%d\n", data.stage, data.pid, data.tid, current->pid);
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
-		/* vsync notified to the app (sent by SurfaceFlinger's TimerDispatch) */
-		if (data.stage == BOOST_TD_APP_NOTIFY) {
-			ofb_cl_chk_td_period(true);
-			return 0;
-		}
+		{
+			const struct ofb_cl_ops *cl = READ_ONCE(ofb_cl);
 
-		/* app render thread queued its buffer */
-		if (data.stage == BOOST_RT_QBUF_END)
-			ofb_cl_enq_update(data.pid);
+			/* vsync notified to the app (sent by SurfaceFlinger's TimerDispatch) */
+			if (data.stage == BOOST_TD_APP_NOTIFY) {
+				if (cl)
+					cl->chk_td_period(true);
+				return 0;
+			}
+
+			/* app render thread queued its buffer */
+			if (data.stage == BOOST_RT_QBUF_END && cl)
+				cl->enq_update(data.pid);
+		}
 #endif
 
 		if ((data.pid != current->pid) && (data.tid != current->pid))
@@ -160,8 +142,12 @@ static long ofb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return grp_id;
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)
-		if (data.stage == BOOST_RT_QBUF_END)
-			ofb_cl_chk_margin(data.pid);
+		if (data.stage == BOOST_RT_QBUF_END) {
+			const struct ofb_cl_ops *cl = READ_ONCE(ofb_cl);
+
+			if (cl)
+				cl->chk_margin(data.pid);
+		}
 #endif
 
 		if (data.stage == BOOST_FRAME_START) {

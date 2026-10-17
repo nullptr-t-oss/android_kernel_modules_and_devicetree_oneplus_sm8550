@@ -141,4 +141,18 @@ extern void cl_chk_margin(int pid);
 extern void cl_chk_td_period(bool from_app);
 extern void cl_enq_update(int pid);
 
+/*
+ * Entry points the frame ioctl module calls. close_loop registers this table with
+ * ua_cpu_ioctl (ofb_cl_register_ops) instead of ua_cpu_ioctl looking the functions up:
+ * with clang CFI, a function pointer taken inside the owning module is the only kind
+ * another module may call indirectly. This also keeps ua_cpu_ioctl independent of close_loop.
+ */
+struct ofb_cl_ops {
+	void (*chk_td_period)(bool from_app);
+	void (*enq_update)(int pid);
+	void (*chk_margin)(int pid);
+};
+
+extern void ofb_cl_register_ops(const struct ofb_cl_ops *ops);
+
 #endif /* __CLOSE_LOOP_H__ */

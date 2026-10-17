@@ -6,6 +6,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/kprobes.h>
 #include <../kernel/sched/walt/walt.h>
+#include <asm/cpufeature.h>
 #include <linux/sched/walt.h>
 
 #include <linux/kernel.h>
@@ -562,7 +563,11 @@ static void amu_update_tick_handler(void *data, struct rq *rq)
 
 static void cl_init_amu(void)
 {
-	if (IS_ENABLED(CONFIG_ARM64_AMU_EXTN)) {
+	/*
+	 * The config option only says the kernel can use the AMU. If firmware does not
+	 * enable it, reading the counters from the tick hook traps, so check at runtime too.
+	 */
+	if (IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && cpus_have_const_cap(ARM64_HAS_AMU_EXTN)) {
 #ifdef CONFIG_ARCH_QCOM
 		register_trace_android_vh_scheduler_tick(amu_update_tick_handler, NULL);
 		amu_enable = 1;
@@ -1199,10 +1204,18 @@ void cl_init(struct proc_dir_entry *dir)
 	walt_cl_update_util_ops(cl_util, cl_boost_util);
 }
 
+static const struct ofb_cl_ops cl_ofb_ops = {
+	.chk_td_period	= cl_chk_td_period,
+	.enq_update	= cl_enq_update,
+	.chk_margin	= cl_chk_margin,
+};
+
 static int __init close_loop_init(void)
 {
 	pr_err("%s\n", __func__);
 	cl_init(NULL);
+	/* last: the ioctl module may call back as soon as this returns */
+	ofb_cl_register_ops(&cl_ofb_ops);
 	return 0;
 }
 
