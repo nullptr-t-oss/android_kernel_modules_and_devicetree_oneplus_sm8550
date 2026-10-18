@@ -61,7 +61,8 @@ static int cl_frame_margin = 20;
 static int cl_active;
 
 /* feature switch */
-int cl_enable;
+/* on by default; write 0 to /proc/oplus_cl/cl_enable to turn it off at runtime */
+int cl_enable = 1;
 EXPORT_SYMBOL_GPL(cl_enable);
 
 static struct cl_accumulate cl_acc;
