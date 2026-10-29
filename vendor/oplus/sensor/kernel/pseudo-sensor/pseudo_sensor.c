@@ -95,7 +95,9 @@
 #define CFG_BUFSIZE                         512
 #define CFG_MAX_SENSORS                     16			// Support 16 SENSOR (data channels)
 #define CFG_SMEM_SZ							SZ_64K
+#ifndef MIN
 #define MIN(a, b)                           ((a) <= (b) ? (a) : (b))
+#endif
 
 /*******************************************************************************
  * driver data defined

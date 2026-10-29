@@ -280,9 +280,12 @@ static void rwsem_update_ux_cnt_when_add(struct rw_semaphore *sem)
 		return;
 
 	/* Record the ux flag when task is added to wait list */
-	ots->lkinfo.is_block_ux = (ots->ux_state & SCHED_ASSIST_UX_MASK) || (current->prio < MAX_RT_PRIO);
-	if (ots->lkinfo.is_block_ux)
+	if ((ots->ux_state & SCHED_ASSIST_UX_MASK) || (current->prio < MAX_RT_PRIO)) {
+		set_bit(IS_BLOCK_UX_BIT, &ots->lkinfo.state_flags);
 		atomic_long_inc(&osem->count);
+	} else {
+		clear_bit(IS_BLOCK_UX_BIT, &ots->lkinfo.state_flags);
+	}
 }
 
 static void rwsem_update_ux_cnt_when_remove(struct rw_semaphore *sem)
@@ -299,11 +302,10 @@ static void rwsem_update_ux_cnt_when_remove(struct rw_semaphore *sem)
 	 * care about the current ux flag. This avoids the corruption
 	 * of the number caused by ux change when in waiter list.
 	 */
-	if (ots->lkinfo.is_block_ux) {
+	if (test_and_clear_bit(IS_BLOCK_UX_BIT, &ots->lkinfo.state_flags)) {
 		/* Count == 0! Something is wrong! */
 		WARN_ON_ONCE(!atomic_long_read(&osem->count));
 		atomic_long_add(-1, &osem->count);
-		ots->lkinfo.is_block_ux = false;
 	}
 }
 #endif

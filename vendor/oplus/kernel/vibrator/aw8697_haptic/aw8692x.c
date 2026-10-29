@@ -1297,34 +1297,17 @@ static ssize_t aw8692x_get_reg(struct aw_haptic *aw_haptic, ssize_t len,
 			       char *buf)
 {
 	uint8_t i = 0;
-	uint8_t size = 0;
-	uint8_t cnt = 0;
-	uint8_t reg_array[AW8692X_REG_SUM] = {0};
+	uint8_t reg_array[AW8692X_REG_ANACFG20 + 1] = {0};
 
-	aw_dev_dbg("%s: enter!\n", __func__);
+	aw_dev_info("%s: enter!\n", __func__);
 
-	for (i = 0; i <= (AW8692X_REG_ANACFG20 + 1); i++) {
-
-		if (i == aw8692x_reg_list[cnt] &&
-		    (cnt < sizeof(aw8692x_reg_list))) {
-			size++;
-			cnt++;
-			continue;
-		} else {
-			if (size != 0) {
-				i2c_r_bytes(aw_haptic,
-					    aw8692x_reg_list[cnt-size],
-					    &reg_array[cnt-size], size);
-				size = 0;
-
-			}
-		}
+	for (i = 0; i <= AW8692X_REG_ANACFG20; i++) {
+		i2c_r_bytes(aw_haptic, i, &reg_array[i], 1);
 	}
 
 	for (i = 0; i < sizeof(reg_array); i++) {
 		len += snprintf(buf + len, PAGE_SIZE - len,
-				"reg:0x%02X=0x%02X\n", aw8692x_reg_list[i],
-				reg_array[i]);
+			"reg:0x%02X=0x%02X\n", i , reg_array[i]);
 	}
 
 	return len;

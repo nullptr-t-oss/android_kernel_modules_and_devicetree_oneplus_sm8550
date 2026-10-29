@@ -21,12 +21,19 @@
 #endif
 
 #include "sched_assist_locking.h"
-struct kmem_cache *oplus_task_struct_cachep;
-EXPORT_SYMBOL(oplus_task_struct_cachep);
+static struct kmem_cache *oplus_task_struct_cachep;
 
-static inline struct oplus_task_struct *alloc_oplus_task_struct_node(int node)
+static inline void init_oplus_task_struct(struct oplus_task_struct *ots, struct task_struct *task);
+
+static inline struct oplus_task_struct *alloc_oplus_task_struct(struct task_struct *task)
 {
-	return kmem_cache_alloc(oplus_task_struct_cachep, GFP_ATOMIC);
+	struct oplus_task_struct *ots = kmem_cache_alloc(oplus_task_struct_cachep, GFP_ATOMIC);
+	if (IS_ERR_OR_NULL(ots))
+		return NULL;
+
+	init_oplus_task_struct(ots, task);
+	ots->task = task;
+	return ots;
 }
 
 static inline void free_oplus_task_struct(struct oplus_task_struct *ots)
@@ -37,16 +44,9 @@ static inline void free_oplus_task_struct(struct oplus_task_struct *ots)
 	kmem_cache_free(oplus_task_struct_cachep, ots);
 }
 
-/* called from kernel_clone() to get node information for about to be created task */
-static int oplus_tsk_fork_get_node(struct task_struct *tsk)
-{
-	return NUMA_NO_NODE;
-}
-
 void android_vh_dup_task_struct_handler(void *unused,
 		struct task_struct *tsk, struct task_struct *orig)
 {
-	int node;
 	struct oplus_task_struct *ots;
 	struct oplus_task_struct *orig_ots;
 
@@ -56,18 +56,11 @@ void android_vh_dup_task_struct_handler(void *unused,
 	if (!IS_ERR_OR_NULL((void *)tsk->android_oem_data1[OTS_IDX]))
 		return;
 
-	node = oplus_tsk_fork_get_node(orig);
-	ots = alloc_oplus_task_struct_node(node);
+	ots = alloc_oplus_task_struct(tsk);
 	if (IS_ERR_OR_NULL(ots)) {
 		ux_err("failed %s oplus_task_struc common:%s, pid:%d, tgid=%d\n", __func__, tsk->comm, tsk->pid, tsk->tgid);
 		return;
 	}
-
-	atomic_set(&ots->is_vip_mvp, 0);
-	ots->task = tsk;
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-	ots->uid_struct = NULL;
-#endif
 	/* if thread fork from RenderThread, inherit its IM_FLAG_RENDER_THREAD */
 	orig_ots = get_oplus_task_struct(orig);
 	if (!IS_ERR_OR_NULL(orig_ots)) {
@@ -103,31 +96,6 @@ void android_vh_free_task_handler(void *unused, struct task_struct *tsk)
 #endif
 
 	WRITE_ONCE(tsk->android_oem_data1[OTS_IDX], 0);
-	barrier();
-
-#ifdef CONFIG_LOCKING_PROTECT
-	list_del_init(&ots->locking_entry);
-#endif
-	RB_CLEAR_NODE(&ots->ux_entry);
-	RB_CLEAR_NODE(&ots->exec_time_node);
-	list_del_init(&ots->fbg_list);
-	atomic_set(&ots->is_vip_mvp, 0);
-	ots->task = NULL;
-
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
-	RB_CLEAR_NODE(&ots->ddl_node);
-	ots->ddl = ots->ddl_active_ts = 0;
-	memset(&ots->state, 0, sizeof(unsigned long));
-#endif
-
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-	ots->uid_struct = NULL;
-#endif
-
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_QOS_SCHED)
-	ots->qos_level = -1;
-	ots->qos_recover_prio = -2;
-#endif
 
 	ots->im_flag = 0;
 	smp_mb();
@@ -155,56 +123,23 @@ static void unregister_oemdata_hooks(void)
  * NOTE:
  * Initialize the oplus_task_struct here.
  */
-static void init_oplus_task_struct(void *ptr)
+static void init_oplus_task_struct(struct oplus_task_struct *ots, struct task_struct *task)
 {
-	struct oplus_task_struct *ots = ptr;
+/* NOTE: No increase in oplus_task_struct memory consumption. */
+#if !defined(CONFIG_DEBUG_SPINLOCK) && !defined(CONFIG_DEBUG_LOCK_ALLOC)
+	BUILD_BUG_ON(sizeof(struct oplus_task_struct) > 512);
+#endif
 
 	memset(ots, 0, sizeof(struct oplus_task_struct));
 
 	RB_CLEAR_NODE(&ots->ux_entry);
 	RB_CLEAR_NODE(&ots->exec_time_node);
-	INIT_LIST_HEAD(&ots->fbg_list);
-
-	atomic64_set(&ots->inherit_ux, 0);
+	ots->cfs_delta = -1;
+	ots->sub_ux_state = 0;
 	ots->ux_priority = -1;
 	ots->ux_nice = -1;
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_ABNORMAL_FLAG)
-	ots->abnormal_flag = 0;
-#endif
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
-	ots->lb_state = 0;
-	ots->ld_flag = 0;
-#endif
-	cpumask_clear(&ots->cpus_requested);
-	ots->target_process = -1;
-	ots->update_running_start_time = false;
-#if IS_ENABLED(CONFIG_OPLUS_LOCKING_STRATEGY)
-	memset(&ots->lkinfo, 0, sizeof(struct locking_info));
-#endif
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
-	RB_CLEAR_NODE(&ots->ddl_node);
-#endif
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-	ots->block_start_time = 0;
-#endif
-#ifdef CONFIG_LOCKING_PROTECT
-	INIT_LIST_HEAD(&ots->locking_entry);
-	ots->locking_start_time = 0;
-	ots->locking_depth = 0;
-#endif
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
-	/* for loadbalance */
-	plist_node_init(&ots->rtb, MAX_IM_FLAG_PRIO);
-#endif
-
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-	ots->amu_cycle = 0;
-	ots->amu_instruct = 0;
-#endif
-
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_PIPELINE)
-	atomic_set(&ots->pipeline_cpu, -1);
-#endif
+	ots->affinity_pid = -1;
+	ots->affinity_tgid = -1;
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_QOS_SCHED)
 	ots->qos_level = -1;
@@ -212,9 +147,70 @@ static void init_oplus_task_struct(void *ptr)
 	mutex_init(&ots->qs_mutex);
 #endif
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TASK_SCHED)
+	ots->target_process = -1;
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_LOCKING_STRATEGY)
+	memset(&ots->lkinfo, 0, sizeof(struct locking_info));
+#endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
+	ots->block_start_time = 0;
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
+	ots->ddl = 0;
+	ots->ddl_active_ts = 0;
+	ots->runnable_ts = 0;
+	RB_CLEAR_NODE(&ots->ddl_node);
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+	INIT_LIST_HEAD(&ots->fbg_list);
 	raw_spin_lock_init(&ots->fbg_list_entry_lock);
 	ots->preferred_cluster_id = -1;
 	ots->fbg_depth = -1;
+#endif
+
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
+	INIT_LIST_HEAD(&ots->locking_entry);
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FDLEAK_CHECK)
+	ots->fdleak_flag = 0;
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
+	/* for loadbalance */
+	ots->snap_pcount = 0;
+	ots->snap_run_delay = 0;
+	plist_node_init(&ots->rtb, MAX_IM_FLAG_PRIO);
+#endif
+
+#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
+	ots->uid_struct = NULL;
+	ots->amu_cycle = 0;
+	ots->amu_instruct = 0;
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_SCHED_TUNE)
+	ots->stune_idx = -1;
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_PIPELINE)
+	atomic_set(&ots->pipeline_cpu, -1);
+#endif
+
+#ifdef CONFIG_OPLUS_CAMERA_UX
+	if (task_uid(task).val == CAMERA_UID) {
+		if (!strncmp(task->comm, CAMERA_PROVIDER_NAME, 15))
+			ots->ux_state = SA_TYPE_HEAVY;
+	}
+#endif
+#ifdef CONFIG_OPLUS_CAMERA_UX
+	if (!strncmp(task->comm, "C2OMXNode", 15) || !strncmp(task->comm, "MP4WtrAudTrkThr", 15) || !strncmp(task->comm, "MP4WtrVidTrkThr", 15))
+			ots->ux_state = SA_TYPE_ANIMATOR;
+#endif
 }
 
 static void alloc_ots_mem_for_all_threads(void)
@@ -229,13 +225,8 @@ static void alloc_ots_mem_for_all_threads(void)
 
 		ots = (struct oplus_task_struct *) READ_ONCE(p->android_oem_data1[OTS_IDX]);
 		if (IS_ERR_OR_NULL(ots)) {
-			ots = kmem_cache_alloc(oplus_task_struct_cachep, GFP_ATOMIC);
-
+			ots = alloc_oplus_task_struct(p);
 			if (!IS_ERR_OR_NULL(ots)) {
-				ots->task = p;
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-				ots->uid_struct = NULL;
-#endif
 				smp_mb();
 
 				WRITE_ONCE(p->android_oem_data1[OTS_IDX], (u64) ots);
@@ -248,12 +239,8 @@ static void alloc_ots_mem_for_all_threads(void)
 		p = cpu_rq(iter_cpu)->idle;
 		ots = (struct oplus_task_struct *) READ_ONCE(p->android_oem_data1[OTS_IDX]);
 		if (IS_ERR_OR_NULL(ots)) {
-			ots = kmem_cache_alloc(oplus_task_struct_cachep, GFP_ATOMIC);
+			ots = alloc_oplus_task_struct(p);
 			if (!IS_ERR_OR_NULL(ots)) {
-				ots->task = p;
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-				ots->uid_struct = NULL;
-#endif
 				smp_mb();
 
 				WRITE_ONCE(p->android_oem_data1[OTS_IDX], (u64) ots);
@@ -267,7 +254,7 @@ int sa_oemdata_init(void)
 {
 	oplus_task_struct_cachep = kmem_cache_create("oplus_task_struct",
 			sizeof(struct oplus_task_struct), 0,
-			SLAB_PANIC|SLAB_ACCOUNT, init_oplus_task_struct);
+			SLAB_PANIC | SLAB_ACCOUNT, NULL);
 
 	if (!oplus_task_struct_cachep)
 		return -ENOMEM;

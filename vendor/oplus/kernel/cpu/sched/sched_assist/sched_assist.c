@@ -23,7 +23,7 @@
 #include "sa_balance.h"
 #endif
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 #include "sched_assist_locking.h"
 #endif
 
@@ -108,7 +108,6 @@ static int register_scheduler_vendor_hooks(void)
 #endif
 
 	/* register vender hook in kernel/sched/core.c */
-	REGISTER_TRACE_RVH(android_rvh_sched_fork, android_rvh_sched_fork_handler);
 	REGISTER_TRACE_RVH(android_rvh_schedule, android_rvh_schedule_handler);
 	REGISTER_TRACE_RVH(android_vh_scheduler_tick, android_vh_scheduler_tick_handler);
 #ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
@@ -132,7 +131,7 @@ static int register_scheduler_vendor_hooks(void)
 
 	REGISTER_TRACE_VH(android_rvh_wake_up_new_task, android_rvh_wake_up_new_task_handler);
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	sched_assist_locking_init();
 #endif
 
@@ -179,7 +178,7 @@ void enable_sched_assist(int step) {
 
 	if (OPLUS_UX_HOOK_MASK == ux_hooks) {
 		global_sched_assist_enabled |= FEATURE_COMMON;
-	#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+	#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 		global_sched_assist_enabled |= FEATURE_SPREAD;
 	#endif
 	}

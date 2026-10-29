@@ -406,7 +406,7 @@ TRACE_EVENT(binder_set_async_afterpending,
 		__entry->t = t;
 		__entry->obs = obs;
 		__entry->ots_ux_enable = (ots ? ots->binder_async_ux_enable : 0);
-		__entry->ots_ux_sts = (ots ? ots->binder_async_ux_sts : 0);
+		__entry->ots_ux_sts = (ots ? test_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags) : 0);
 		__entry->obs_ux_enable = obs_ux_enable;
 		memcpy(__entry->info, info, T_INFO_LEN);
 	),

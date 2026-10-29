@@ -267,12 +267,18 @@ def define_oplus_chg_v2_module():
         "v2/monitor/oplus_chg_track.c",
         "v2/monitor/oplus_chg_exception.c",
         "v2/plat_ufcs/plat_ufcs_notify.c",
-        "v2/oplus_dischg_boost.c"
+        "v2/oplus_dischg_boost.c",
+        "v2/oplus_gamepad.c"
     ]) + [
         ":oplus_chg_v2_ic_cfg"
     ]
 
     ddk_conditional_srcs = {
+        "CONFIG_OPLUS_TVS_DAMAGE_SUPPORT": {
+            True: [
+                "v2/recovery/oplus_tvs_damage_check.c",
+            ],
+        },
         "CONFIG_OPLUS_CHG_PARALLEL": {
             True: [
                 "v2/oplus_parallel.c",

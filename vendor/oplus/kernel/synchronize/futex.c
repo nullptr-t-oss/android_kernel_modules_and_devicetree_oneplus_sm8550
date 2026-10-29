@@ -168,7 +168,7 @@ static bool boost_holder(struct task_struct *holder, struct task_struct *waiter)
 	 * mark ux_contrib as true(Ya, we have contributed an inherit ux thread).
 	 */
 	if (futex_set_inherit_ux_refs(holder, waiter)) {
-		ots->lkinfo.ux_contrib = true;
+		set_bit(UX_CONTRIB_BIT, &(ots->lkinfo.state_flags));
 
 		cond_trace_printk(locking_opt_debug(LK_DEBUG_FTRACE),
 			"futex holder comm=%-12s pid=%d tgid=%d ux_state=%d\n",
@@ -411,7 +411,7 @@ static void android_vh_futex_wait_end_handler(void *unused, unsigned int flags,
 
 	if (ots->lkinfo.holder) {
 		struct task_struct *holder = ots->lkinfo.holder;
-		if (unlikely(ots->lkinfo.ux_contrib)) {
+		if (unlikely(test_bit(UX_CONTRIB_BIT, &(ots->lkinfo.state_flags)))) {
 			cond_trace_printk(locking_opt_debug(LK_DEBUG_FTRACE),
 				"curr(%-12s pid=%d tgid=%d) has woken, but ux_contrib is true! holder(%-12s pid=%d tgid=%d inherit_ux=%llx)\n",
 				current->comm, current->pid, current->tgid,
@@ -539,9 +539,8 @@ static void android_vh_futex_wake_traverse_plist_handler(void *unused, struct pl
 			if (unlikely(IS_ERR_OR_NULL(ots)))
 				continue;
 
-			if ((ots->lkinfo.holder == current) && ots->lkinfo.ux_contrib) {
+			if ((ots->lkinfo.holder == current) && test_and_clear_bit(UX_CONTRIB_BIT, &(ots->lkinfo.state_flags))) {
 				*target_nr += 1;
-				ots->lkinfo.ux_contrib = false;
 			}
 			cond_trace_printk(locking_opt_debug(LK_DEBUG_FTRACE),
 				"idx=%d this=%-12s pid=%d tgid=%d nr=%d\n",
@@ -559,9 +558,8 @@ static void android_vh_futex_wake_this_handler(void *unused, int ret, int nr_wak
 	if (unlikely(IS_ERR_OR_NULL(ots)))
 		return;
 
-	if (ots->lkinfo.ux_contrib && ots->lkinfo.holder) {
+	if (test_and_clear_bit(UX_CONTRIB_BIT, &(ots->lkinfo.state_flags)) && ots->lkinfo.holder) {
 		futex_unset_inherit_ux_refs(ots->lkinfo.holder, 1, 2);
-		ots->lkinfo.ux_contrib = false;
 	}
 
 	if (likely(!curr_is_inherit_futex()))

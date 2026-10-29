@@ -83,6 +83,7 @@ enum config_download {
 };
 
 struct zeroflash_hcd *g_zeroflash_hcd = NULL;
+static void zeroflash_reset_download_firmware(void);
 
 int zeroflash_parse_fw_image(void)
 {
@@ -663,8 +664,10 @@ static void zeroflash_download_config_work(struct work_struct *work)
 			if (tcm_hcd->health_monitor_support) {
 			/*	tcm_hcd->monitor_data->reserve2++;*/
 			}
-			TPD_INFO(
-				"Failed to download application config\n");
+			if (tcm_hcd->status_report_code != REPORT_IDENTIFY) {
+				zeroflash_reset_download_firmware();
+			}
+			TPD_INFO("Failed to download application config\n");
 			return;
 		}
 		goto exit;

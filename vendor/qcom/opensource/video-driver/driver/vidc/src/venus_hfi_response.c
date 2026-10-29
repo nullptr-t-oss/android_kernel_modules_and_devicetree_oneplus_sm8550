@@ -16,6 +16,7 @@
 #include "msm_vidc_memory.h"
 #include "msm_vidc_fence.h"
 
+#undef in_range
 #define in_range(range, val) (((range.begin) < (val)) && ((range.end) > (val)))
 
 extern struct msm_vidc_core *g_core;

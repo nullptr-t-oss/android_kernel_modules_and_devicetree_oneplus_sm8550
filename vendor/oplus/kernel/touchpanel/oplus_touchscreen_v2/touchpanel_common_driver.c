@@ -113,6 +113,10 @@ struct touchpanel_data *g_tp[TP_SUPPORT_MAX] = {NULL};
 static DEFINE_MUTEX(tp_core_lock);
 int cur_tp_index = 0;
 EXPORT_SYMBOL(cur_tp_index);
+
+#define TOUCH_MINOR_SPECIAL_VALUE    255
+#define INPUTS_FINGER_DOWN_INTERVAL_MS    150
+
 /*******Part2:declear Area********************************/
 static void speedup_resume(struct work_struct *work);
 static void lcd_trigger_load_tp_fw(struct work_struct *work);
@@ -472,6 +476,100 @@ static void touch_call_notifier_fp(struct fp_underscreen_info *fp_info)
 #endif
 }
 
+static bool is_fp_prevent_area(struct touchpanel_data *ts, unsigned int x, unsigned int y)
+{
+	u32 cx, cy, hw, hh;
+	u32 x_min, x_max, y_min, y_max;
+
+	if (!ts) {
+		return false;
+	}
+
+	cx = ts->fp_prevent_para[0];
+	cy = ts->fp_prevent_para[1];
+	hw = ts->fp_prevent_para[2];
+	hh = ts->fp_prevent_para[3];
+
+	/* half not configured: feature invalid */
+	if (!hw || !hh) {
+		return false;
+	}
+
+	x_min = (cx >= hw) ? (cx - hw) : 0;
+	x_max = cx + hw;
+	y_min = (cy >= hh) ? (cy - hh) : 0;
+	y_max = cy + hh;
+
+	if (ts->resolution_info.max_x && x_max > ts->resolution_info.max_x)
+		x_max = ts->resolution_info.max_x;
+	if (ts->resolution_info.max_y && y_max > ts->resolution_info.max_y)
+		y_max = ts->resolution_info.max_y;
+
+	if (x >= x_min && x <= x_max && y >= y_min && y <= y_max) {
+		TPD_DETAIL("x:%u y:%u is in fp prevent area\n", x, y);
+		return true;
+	}
+
+	TPD_DETAIL("x:%u y:%u is not in fp prevent area\n", x, y);
+	return false;
+}
+
+static void set_first_down_time(struct touchpanel_data *ts)
+{
+	ts->fp_first_down_ktime = ktime_get();
+	ts->fp_first_down_timer_valid = true;
+}
+
+static bool is_fp_prevent_enable(struct touchpanel_data *ts, unsigned int x,
+				    unsigned int y, int id)
+{
+	s64 delta_ms;
+
+	if (!ts->fp_down_prevent_support || !ts->fp_first_down_event)
+		return false;
+
+	if (id != 0)
+		return false;
+
+	/* only first id0 down in this contact */
+	if (CHK_BIT(ts->irq_slot, (1 << id)))
+		return false;
+
+	/* 150ms window starts at resume (HBP STATE_SCREEN_ON), not at first touch */
+	if (!ts->fp_first_down_timer_valid)
+		return false;
+
+	delta_ms = ktime_to_ms(ktime_sub(ktime_get(), ts->fp_first_down_ktime));
+	if (delta_ms >= INPUTS_FINGER_DOWN_INTERVAL_MS) {
+		ts->fp_first_down_event = false;
+		ts->fp_first_down_timer_valid = false;
+		return false;
+	}
+
+	return is_fp_prevent_area(ts, x, y);
+}
+
+static void first_down_handle(struct touchpanel_data *ts)
+{
+	if (!ts->fp_down_prevent_support)
+		return;
+
+	if (ts->fp_minor_reported) {
+		ts->fp_minor_reported = false;
+		ts->fp_first_down_event = false;
+		ts->fp_first_down_timer_valid = false;
+		return;
+	}
+
+	if (!ts->fp_first_down_event)
+		return;
+
+	if (ts->fp_first_down_timer_valid) {
+		ts->fp_first_down_event = false;
+		ts->fp_first_down_timer_valid = false;
+	}
+}
+
 static inline void tp_touch_down(struct touchpanel_data *ts, struct point_info points, int touch_report_num, int id)
 {
 	int cost_time = 0;
@@ -527,6 +625,22 @@ static inline void tp_touch_down(struct touchpanel_data *ts, struct point_info p
 		/*pressure_report_support*/
 		input_report_abs(ts->input_dev, ABS_MT_PRESSURE,
 				 ts->last_touch_major);   /*add for fixing gripview tap no function issue*/
+
+		/* fp unlock with finger still down: fix first id0 down in prevent area */
+		if (ts->fp_down_prevent_support) {
+			if (is_fp_prevent_enable(ts, points.x, points.y, id)) {
+				ts->fp_minor_reported = true;
+				input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR,
+						 TOUCH_MINOR_SPECIAL_VALUE);
+				ts->fp_first_down_event = false;
+				TPD_DETAIL("fp unlock first down minor=255, x:%u y:%u\n",
+					   points.x, points.y);
+			} else {
+				input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR,
+						 (TOUCH_MINOR_SPECIAL_VALUE == ts->last_touch_major) ?
+						 (ts->last_touch_major - 1) : ts->last_touch_major);
+			}
+		}
 	}
 
 	if (!CHK_BIT(ts->irq_slot, (1 << id))) {
@@ -753,12 +867,18 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
 		input_sync(ts->input_dev);
 
 	} else if (gesture_info_temp.gesture_type == FINGER_PRINTDOWN) {
+		ts->fp_first_down_event = true;
+		ts->fp_minor_reported = false;
+		ts->fp_first_down_timer_valid = false;
 		ts->fp_info.touch_state = 1;
 		ts->fp_info.x = gesture_info_temp.Point_start.x;
 		ts->fp_info.y = gesture_info_temp.Point_start.y;
 		TP_INFO(ts->tp_index, "screen off down : (%d, %d)\n", ts->fp_info.x, ts->fp_info.y);
 		touch_call_notifier_fp(&ts->fp_info);
 	} else if (gesture_info_temp.gesture_type == FRINGER_PRINTUP) {
+		ts->fp_first_down_event = false;
+		ts->fp_minor_reported = false;
+		ts->fp_first_down_timer_valid = false;
 		ts->fp_info.touch_state = 0;
 		ts->fp_info.x = gesture_info_temp.Point_start.x;
 		ts->fp_info.y = gesture_info_temp.Point_start.y;
@@ -820,6 +940,7 @@ static void tp_touch_release(struct touchpanel_data *ts)
 	ts->view_area_touched = 0; /*realse all touch point,must clear this flag*/
 	ts->touch_count = 0;
 	ts->irq_slot = 0;
+	/* fp_first_down_event cleared by tp_first_down_handle / fp up only */
 }
 
 static inline void tp_touch_helper_handle(struct touchpanel_data *ts)
@@ -1026,6 +1147,7 @@ static inline void tp_touch_handle(struct touchpanel_data *ts)
 		ts->view_area_touched = 0;
 		ts->irq_slot = 0;
 		ts->up_status = true;
+		first_down_handle(ts);
 		TP_DETAIL(ts->tp_index, "all touch up,view_area_touched=%d finger_num=%d\n",
 			  ts->view_area_touched, finger_num);
 		TP_DETAIL(ts->tp_index, "last point x:%d y:%d\n", ts->last_point.x,
@@ -1247,6 +1369,9 @@ static void tp_fingerprint_handle(struct touchpanel_data *ts)
 	ts->fp_info.x = fp_tpinfo.x;
 	ts->fp_info.y = fp_tpinfo.y;
 	if (fp_tpinfo.touch_state == FINGERPRINT_DOWN_DETECT) {
+		ts->fp_first_down_event = true;
+		ts->fp_minor_reported = false;
+		ts->fp_first_down_timer_valid = false;
 		TP_INFO(ts->tp_index, "screen on down : (%d, %d)\n",
 			ts->fp_info.x,
 			ts->fp_info.y);
@@ -1259,6 +1384,9 @@ static void tp_fingerprint_handle(struct touchpanel_data *ts)
 					     &fp_tpinfo.area_rate);
 		}
 	} else if (fp_tpinfo.touch_state == FINGERPRINT_UP_DETECT) {
+		ts->fp_first_down_event = false;
+		ts->fp_minor_reported = false;
+		ts->fp_first_down_timer_valid = false;
 		TP_INFO(ts->tp_index, "screen on up : (%d, %d)\n", ts->fp_info.x, ts->fp_info.y);
 		ts->fp_info.touch_state = 0;
 		touch_call_notifier_fp(&ts->fp_info);
@@ -1810,6 +1938,9 @@ static int init_input_device(struct touchpanel_data *ts)
 	set_bit(EV_ABS, ts->input_dev->evbit);
 	set_bit(EV_KEY, ts->input_dev->evbit);
 	set_bit(ABS_MT_TOUCH_MAJOR, ts->input_dev->absbit);
+	if (ts->fp_down_prevent_support) {
+		set_bit(ABS_MT_TOUCH_MINOR, ts->input_dev->absbit);
+	}
 	set_bit(ABS_MT_WIDTH_MAJOR, ts->input_dev->absbit);
 	set_bit(ABS_MT_POSITION_X, ts->input_dev->absbit);
 	set_bit(ABS_MT_POSITION_Y, ts->input_dev->absbit);
@@ -1886,6 +2017,9 @@ static int init_input_device(struct touchpanel_data *ts)
 	if (!ret)
 		TP_BOOT_INFO(ts->tp_index, "%s: input_mt_init_slots return %d\n", __func__, ret);
 	input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
+	if (ts->fp_down_prevent_support) {
+		input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MINOR, 0, 255, 0, 0);
+	}
 	//input_set_abs_params(ts->input_dev, ABS_MT_PRESSURE, 0, 255, 0, 0);
 	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_X, 0,
 			     ts->resolution_info.max_x - 1, 0, 0);
@@ -2197,6 +2331,40 @@ static void tp_healthinfo_init_dts_child_node(struct device *dev, struct touchpa
  * If there is any Resource needed by chip_data, we can add a call-back func in this function
  * Do not care the result : Returning void type
  */
+static void tp_parse_fp_prevent_dts(struct device_node *np, struct touchpanel_data *ts)
+{
+	int rc;
+
+	ts->fp_down_prevent_support = false;
+	memset(ts->fp_prevent_para, 0, sizeof(ts->fp_prevent_para));
+
+	if (!ts->fingerprint_underscreen_support) {
+		return;
+	}
+
+	ts->fp_down_prevent_support = of_property_read_bool(np, "fp_down_prevent_support");
+	if (!ts->fp_down_prevent_support) {
+		return;
+	}
+
+	rc = of_property_read_u32_array(np, "touchpanel,fp-prevent-para",
+					ts->fp_prevent_para, 4);
+	if (rc) {
+		ts->fp_down_prevent_support = false;
+		return;
+	}
+
+	if (!ts->fp_prevent_para[2] || !ts->fp_prevent_para[3]) {
+		ts->fp_down_prevent_support = false;
+		memset(ts->fp_prevent_para, 0, sizeof(ts->fp_prevent_para));
+		return;
+	}
+	TP_BOOT_INFO(ts->tp_index,
+		     "fp-prevent-para [%u %u %u %u]\n",
+		     ts->fp_prevent_para[0], ts->fp_prevent_para[1],
+		     ts->fp_prevent_para[2], ts->fp_prevent_para[3]);
+}
+
 static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 {
 	int rc, ret = 0;
@@ -2987,6 +3155,8 @@ static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 		ts->aiunit_game_valid_bits = 19;
 	}
 
+	tp_parse_fp_prevent_dts(np, ts);
+
 	init_panel_config(dev, ts);
 
 	return ret;
@@ -3446,7 +3616,7 @@ int tp_register_irq_func(struct touchpanel_data *ts)
 		if (ret < 0) {
 			TP_INFO(ts->tp_index, "%s request_threaded_irq ret is %d\n", __func__, ret);
 		}
-
+		ts->tp_irq_desc = irq_to_desc(ts->irq);
 	} else {
 		TP_INFO(ts->tp_index, "%s:no valid irq\n", __func__);
 		ret = -1;
@@ -3460,6 +3630,7 @@ tvm_setup:
 				tp_irq_thread_fn,
 				ts->irq_tui_flags | IRQF_ONESHOT,
 				ts->irq_name, ts);
+	ts->tp_irq_desc = irq_to_desc(ts->irq);
 	return 0;
 #endif
 }
@@ -4699,6 +4870,7 @@ static void tp_resume(struct device *dev)
 	struct touchpanel_data *ts = dev_get_drvdata(dev);
 	struct device_node *chip_np = NULL;
 	struct device_node *src_chip_np = NULL;
+	int i = 0;
 	TP_INFO(ts->tp_index, "%s start.\n", __func__);
 	if (!ts->is_suspended && (!ts->in_aod_flag && !ts->out_aod_flag)) {
 		TP_INFO(ts->tp_index, "%s: do not resume twice.\n", __func__);
@@ -4723,6 +4895,23 @@ static void tp_resume(struct device *dev)
 		devm_free_irq(ts->dev, ts->irq, ts);
 		if (ts->int_mode == UNBANNABLE) {
 			mutex_unlock(&ts->mutex);
+		}
+	}
+
+	if (ts->tp_ic_type == TYPE_TDDI_TCM && ts->is_noflash_ic) {
+		if (ts->tp_irq_desc != NULL) {
+			if (ts->tp_irq_desc->depth > 0) {
+				TP_INFO(ts->tp_index, "%s: tp resume irq TP IRQ depth:%d.\n",
+						__func__, ts->tp_irq_desc->depth);
+				while (ts->tp_irq_desc->depth > 0 && i < 10) {
+					enable_irq(ts->irq);
+					i++;
+					TP_INFO(ts->tp_index, "%s: tp resume irq TP IRQ depth:%d.\n",
+							__func__, ts->tp_irq_desc->depth);
+				}
+			}
+		} else {
+			TP_INFO(ts->tp_index, "%s: tp_irq_desc is NULL, skip irq depth check\n", __func__);
 		}
 	}
 
@@ -4851,6 +5040,23 @@ static void speedup_resume(struct work_struct *work)
 	}
 
 EXIT:
+	/*
+	 * HBP: set_first_down_time() on STATE_SCREEN_ON.
+	 * Keep touch_state until after reset/specific_resume skip checks,
+	 * then clear stale touch_state and start 150ms prevent window.
+	 */
+	if (ts->fp_down_prevent_support && ts->fp_first_down_event) {
+		set_first_down_time(ts);
+		TP_INFO(ts->tp_index,
+			"speedup_resume: fp unlock, start %d ms prevent window\n",
+			INPUTS_FINGER_DOWN_INTERVAL_MS);
+	}
+	if (ts->fp_down_prevent_support && ts->fp_info.touch_state) {
+		TP_INFO(ts->tp_index,
+			"speedup_resume: clear stale touch_state\n");
+		ts->fp_info.touch_state = 0;
+	}
+
 	ts->suspend_state = TP_SPEEDUP_RESUME_COMPLETE;
 	if ((ts->temperature_detect_support && ts->skin_therm_chan) || ts->temperature_detect_shellback_support)
 		hrtimer_start(&ts->temp_timer, ktime_set(15, 0), HRTIMER_MODE_REL);
@@ -4892,8 +5098,10 @@ static void lcd_off_early_event(struct touchpanel_data *ts)
 
 	} else if (ts->tp_suspend_order == LCD_TP_SUSPEND) {
 		if (!ts->gesture_enable && ts->is_incell_panel) {
-			disable_irq_nosync(ts->irq);
-			ts->irq_state = 0;
+			if (ts->tp_irq_desc != NULL && ts->tp_irq_desc->depth == 0) {
+				disable_irq_nosync(ts->irq);
+				ts->irq_state = 0;
+			}
 		}
 	}
 
@@ -4936,7 +5144,9 @@ static void lcd_on_early_event(struct touchpanel_data *ts)
 
 	} else if (ts->tp_resume_order == LCD_TP_RESUME) {
 		if (!(ts->tp_ic_type == TYPE_TDDI_TCM && ts->is_noflash_ic)) {
-			disable_irq_nosync(ts->irq);
+			if (ts->tp_irq_desc != NULL && ts->tp_irq_desc->depth == 0) {
+				disable_irq_nosync(ts->irq);
+			}
 		}
 	}
 };

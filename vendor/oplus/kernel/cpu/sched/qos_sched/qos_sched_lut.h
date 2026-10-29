@@ -11,6 +11,7 @@
 #define MAX_QOS_LEVEL       (256)
 #define QOS_LATENCY_SHIFT   (32)
 #define QOS_LUT_NUM   (2)
+#define QOS_LUT_TYPE_MASK   (7)
 #define LUT_CTRL_MAGIC 'p'
 
 struct qos_lut_ioctl_request {
@@ -42,8 +43,9 @@ struct qos_lut {
 };
 
 struct qos_lut_info {
+	s32   lut_num;
 	s32   lut_size;
-	void *mem;
+	struct qos_lut_item *mem;
 };
 
 struct qos_lut_ctl {

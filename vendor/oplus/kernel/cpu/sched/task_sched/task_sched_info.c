@@ -219,15 +219,15 @@ static void update_running_start_time(struct task_struct *prev, struct task_stru
 	clock = cpu_clock(prev->cpu);
 	if (!IS_ERR_OR_NULL(ots_prev)) {
 		delay = clock - ots_prev->running_start_time;
-		if (ots_prev->update_running_start_time)
+		if (test_bit(UPDATE_RUNNING_START_TIME_BIT, &ots_prev->common_flags))
 			update_task_sched_info(prev, delay, 0, prev->cpu);
 		ots_prev->running_start_time = 0;
-		ots_prev->update_running_start_time = false;
+		clear_bit(UPDATE_RUNNING_START_TIME_BIT, &ots_prev->common_flags);
 	}
 
 	if (!IS_ERR_OR_NULL(ots_next)) {
 		ots_next->running_start_time = clock;
-		ots_next->update_running_start_time = true;
+		set_bit(UPDATE_RUNNING_START_TIME_BIT, &ots_next->common_flags);
 	}
 
 	return;
@@ -306,7 +306,7 @@ static void update_backtrace_info(struct task_struct *p, u64 start_time, int typ
 		return;
 
 	task_backtrace.sched_info_one = task_sched_info_backtrace | (p->pid << 8);
-	task_backtrace.sched_info_two = (u64)get_wchan(p);
+	task_backtrace.sched_info_two = 0;
 
 	if (!d_convert_info)
 		d_convert_info = (unsigned long)task_backtrace.sched_info_two;

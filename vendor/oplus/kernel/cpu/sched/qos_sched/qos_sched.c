@@ -282,7 +282,7 @@ static long qs_ctrl_ioctl(struct file *file, unsigned int cmd,
 	void __user *arg = (void __user *) __arg;
 	long ret = 0;
 	int i = 0;
-	int qos_level_pid;
+	int level;
 	bool pid_qos_active;
 	struct qos_lut_item *item;
 
@@ -297,9 +297,21 @@ static long qs_ctrl_ioctl(struct file *file, unsigned int cmd,
 		return -EFAULT;
 	}
 
+	/*
+	 * Sanitize the tainted qos level once before it is used as a LUT
+	 * offset. The pid case carries the active-magic bits in the high
+	 * bits, so mask them off first.
+	 */
+	level = (cmd == IOCTL_SET_PID_LEVEL) ?
+		(data.level & QOS_PID_LEVEL_MASK) : data.level;
+	if (level < 0 || level >= MAX_QOS_LEVEL) {
+		pr_err("Invalid qos level %d\n", level);
+		return -EINVAL;
+	}
+
 	switch (cmd) {
 	case IOCTL_SET_TID_LEVEL:
-		item = qs_get_lut_item(data.level, QOS_LUT_TASK);
+		item = qs_get_lut_item(level, QOS_LUT_TASK);
 		if (IS_ERR_OR_NULL(item)) {
 			pr_err("No lut item\n");
 			return -EINVAL;
@@ -308,9 +320,8 @@ static long qs_ctrl_ioctl(struct file *file, unsigned int cmd,
 		break;
 
 	case IOCTL_SET_PID_LEVEL:
-		qos_level_pid = data.level & QOS_PID_LEVEL_MASK;
 		pid_qos_active = data.level >> SCHED_PIDQOS_ACTIVE_MAGIC_SHIFT ? 1 : 0;
-		item = qs_get_lut_item(qos_level_pid, QOS_LUT_PROCESS);
+		item = qs_get_lut_item(level, QOS_LUT_PROCESS);
 		if (IS_ERR_OR_NULL(item)) {
 			pr_err("No lut item\n");
 			return -EINVAL;
@@ -319,7 +330,12 @@ static long qs_ctrl_ioctl(struct file *file, unsigned int cmd,
 		break;
 
 	case IOCTL_SET_TID_ARRAY_LEVEL:
-		item = qs_get_lut_item(data.level, QOS_LUT_TASK);
+		if (data.info.tarray.count < 0 ||
+			data.info.tarray.count > MAX_TIDS) {
+			pr_err("Invalid tid count %d\n", data.info.tarray.count);
+			return -EINVAL;
+		}
+		item = qs_get_lut_item(level, QOS_LUT_TASK);
 		if (IS_ERR_OR_NULL(item)) {
 			pr_err("No lut item\n");
 			return -EINVAL;
@@ -432,7 +448,7 @@ static int write_qos_pid(const char __user *buf, size_t count,
 		if (err)
 			return err;
 
-		if (pid < 0 && pid > PID_MAX_DEFAULT)
+		if (pid < 0 || pid > PID_MAX_DEFAULT)
 			return -EFAULT;
 
 		rcu_read_lock();
@@ -580,6 +596,13 @@ static long qs_lut_ioctl(struct file *file, unsigned int cmd,
 	if (copy_from_user(&request, uarg, sizeof(struct qos_lut_ioctl_request)))
 		return -EFAULT;
 
+	if (unlikely(request.type != QOS_LUT_TASK &&
+		request.type != QOS_LUT_PROCESS &&
+		request.type != QOS_LUT_GROUP)) {
+		pr_err("invalid lut type %d\n", request.type);
+		return -EINVAL;
+	}
+
 	switch (cmd) {
 	case IOCTL_GET_LUT_VERSION:
 		version = qs_get_lut_version(request.type);
@@ -694,9 +717,9 @@ static void android_vh_setscheduler_uclamp_handler(void *unused, struct task_str
 	u32 tg_uv = tg ? tg->uclamp[id].value : id ? 1024 : 0;
 
 	char buffer[256];
-	int len;
-	len = strlcat(buffer, "C|9999|qs_uclamp|", sizeof(buffer));
-	snprintf(buffer + len, sizeof(buffer), "task:[%s %d] uclamp req:[%s %d] tg:[%s %d]\n",
+
+	snprintf(buffer, sizeof(buffer),
+		"C|9999|qs_uclamp|task:[%s %d] uclamp req:[%s %d] tg:[%s %d]\n",
 		p->comm, p->pid, uclamp_name[id], uclamp_value,
 		tg && tg->css.cgroup ? tg->css.cgroup->kn->name : "invalid", tg_uv);
 
@@ -739,9 +762,9 @@ static void android_rvh_wake_up_new_task_handler(void *unused, struct task_struc
 			qs_lvl &= ~(SCHED_PIDQOS_ACTIVE_MAGIC_MASK);
 			item = qs_get_lut_item(qs_lvl, QOS_LUT_PROCESS);
 			if (IS_ERR_OR_NULL(item)) {
-                                pr_err("No lut item\n");
-                                return;
-                        }
+				qs_err("No lut item\n");
+				return;
+			}
 			qs_set_qos_level_by_tid(p->pid, item);
 			return;
 		}

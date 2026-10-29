@@ -1089,6 +1089,12 @@ struct touchpanel_data {
 	int fp_quick_start_data;                            /*for fingerprint quick start featrue*/
 	int fp_disable_after_resume;
 	struct fp_underscreen_info fp_info;	/*tp info used for underscreen fingerprint*/
+	bool fp_down_prevent_support;		/*fp unlock minor=255 area limit enable*/
+	u32 fp_prevent_para[4];		/*center_x, center_y, half_w, half_h in panel-coords*/
+	bool fp_first_down_event;		/*fp down, wait first id0 down fix*/
+	bool fp_minor_reported;		/*minor=255 reported for current fp unlock session*/
+	bool fp_first_down_timer_valid;	/*150ms window started from first id0 down*/
+	ktime_t fp_first_down_ktime;	/*first id0 down time after fp unlock*/
 	struct thermal_zone_device *oplus_shell_themal;
 
 	/******For pm suspend and resume area********/
@@ -1128,6 +1134,7 @@ struct touchpanel_data {
 	struct touchpanel_snr   snr[MAX_FINGER_NUM];        /*snr data*/
 	struct touchpanel_last_x_y_point   last_x_y_point[MAX_FINGER_NUM];        /*last_x_y_point data*/
 	struct exception_data    exception_data;			/*exception_data monitor data*/
+	struct irq_desc *tp_irq_desc;
 
 	/******For Game Hot Zone*******/
 	struct tp_aiunit_game_info tp_ic_aiunit_game_info[MAX_AIUNIT_SET_NUM];    /*tp ic aiunit game info*/

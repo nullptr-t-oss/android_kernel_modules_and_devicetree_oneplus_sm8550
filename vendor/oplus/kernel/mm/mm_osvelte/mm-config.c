@@ -187,6 +187,49 @@ put_node:
 	of_node_put(node);
 }
 
+static void config_frr_show(struct seq_file *m, struct config_data *cd)
+{
+	struct config_frr *config = (struct config_frr *)cd->private;
+
+	seq_printf(m, "[%s]\n", cd->module_name);
+	seq_printf(m, "  enable: %d\n", config->enable);
+}
+
+static void parse_frr_dt(const struct device_node *root)
+{
+	struct config_frr *config;
+	struct config_data *data;
+	struct device_node *node;
+	const char *name = module_name_frr;
+
+	node = of_get_child_by_name(root, name);
+	if (!node)
+		return;
+
+	config = kzalloc(sizeof(*config), GFP_KERNEL);
+	if (!config) {
+		osvelte_loge("failed to allocate\n");
+		goto put_node;
+	}
+
+	config->enable = !of_property_read_bool(node, "feature-disable");
+
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	if (!data) {
+		osvelte_loge("failed to allocate config data\n");
+		kfree(config);
+		goto put_node;
+	}
+
+	data->module_name = name;
+	INIT_LIST_HEAD(&data->list);
+	data->private = config;
+	data->seq_show = config_frr_show;
+	list_add_tail(&data->list, &config_list);
+put_node:
+	of_node_put(node);
+}
+
 static void config_zram_opt_show(struct seq_file *m, struct config_data *cd)
 {
 	struct config_oplus_bsp_zram_opt *config = (struct config_oplus_bsp_zram_opt *)cd->private;
@@ -364,7 +407,6 @@ put_node:
 	of_node_put(node);
 }
 
-
 static int config_list_show(struct seq_file *m, void *data)
 {
 	/* module is initialized at boot stage, so no need lock to protect. */
@@ -484,6 +526,7 @@ static int parse_mm_config_dt(const struct platform_device *pdev)
 	parse_kcompressed_dt(child);
 	parse_mglru_opt_dt(child);
 	parse_allocator_dt(child);
+	parse_frr_dt(child);
 	of_node_put(child);
 	return 0;
 }

@@ -62,7 +62,7 @@
  * aw87xxx marco
  ******************************************************************/
 #define AW87XXX_I2C_NAME	"aw87xxx_pa_2_x_0"
-#define AW87XXX_DRIVER_VERSION	"v2.12.0"
+#define AW87XXX_DRIVER_VERSION	"v2.12.0.1"
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 180))
 #define AW87XXX_FW_BIN_NAME	"../../odm/firmware/awinic/aw87xxx_acf.bin"
 #else

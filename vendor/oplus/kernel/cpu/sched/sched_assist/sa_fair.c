@@ -33,7 +33,7 @@
 #endif
 
 #include <trace_sched_assist.h>
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 #include "sched_assist_locking.h"
 #endif
 #ifdef CONFIG_OPLUS_CPU_AUDIO_PERF
@@ -46,7 +46,7 @@ extern unsigned int sysctl_sched_latency;
 
 #define MS_TO_NS (1000000)
 
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 #define NR_IMBALANCE_THRESHOLD (24)
 struct cpumask nr_mask;
 DEFINE_PER_CPU(struct task_count_rq, task_lb_count);
@@ -609,7 +609,8 @@ bool set_ux_task_to_prefer_cpu_new(struct task_struct *task, int *orig_target_cp
 	int least_nr_cpu = -1;
 	int subopt_cpu = -1, vip_cpu = -1, max_subopt_cpu = -1;
 	long spare_cap = 0, subopt_max_spare_cap = 0;
-	long vip_max_spare_cap = -1, max_spare_cap = -1, rt_max_spare_cap = -1;
+	long vip_max_spare_cap = -1, max_spare_cap = -1;
+	int ux_state = 0, subopt_ux_priority = 0, ux_priority = 0;
 
 	if (unlikely(!global_sched_assist_enabled))
 		return false;
@@ -627,6 +628,7 @@ bool set_ux_task_to_prefer_cpu_new(struct task_struct *task, int *orig_target_cp
 			return false;
 	}
 
+	subopt_ux_priority = ux_state_to_priority(oplus_get_ux_state(task));
 	start_cls = cls_nr = get_task_cls_for_scene(task);
 	ux_cls_boost = start_cls > 0 ? true : false;
 	/* Avoiding ux core selection can easily lead to small cores for tasks
@@ -722,27 +724,25 @@ retry:
 		 * and prevent EAS picking a small core, pick max_spare_cap cpu
 		 * and first cluster
 		 */
-		if (walk_next_cls && strict_ux_task(task))
+		if ((subopt_cpu == -1) && strict_ux_task(task))
 			subopt_cpu = cpu;
 
 		/* If an ux thread running on this CPU, drop it! */
-		if (oplus_get_ux_state(rq->curr) & SCHED_ASSIST_UX_MASK)
+		ux_state = oplus_get_ux_state(rq->curr);
+		if (ux_state & SCHED_ASSIST_UX_MASK) {
+			ux_priority = ux_state_to_priority(ux_state);
+			if (ux_priority < subopt_ux_priority) {
+				subopt_ux_priority = ux_priority;
+				subopt_cpu = cpu;
+			}
 			continue;
+		}
 
 		if (orq_has_ux_tasks(orq))
 			continue;
 
-		if (rq->curr->prio < MAX_RT_PRIO) {
-			if (global_lowend_plat_opt && global_less_prime_cpu_arch) {
-				continue;
-			} else {
-				if (spare_cap > rt_max_spare_cap) {
-					rt_max_spare_cap = spare_cap;
-					subopt_cpu = cpu;
-				}
-				continue;
-			}
-		}
+		if (rq->curr->prio < MAX_RT_PRIO)
+			continue;
 
 		/* If there are rt threads in runnable state on this CPU, drop it! */
 		if (rt_rq_is_runnable(&rq->rt))
@@ -812,7 +812,7 @@ retry:
 		return true;
 	}
 
-	/* 4 No cpu select, RT: max_spare_cap/strict_ux */
+	/* 4 No cpu select, Preempt UX threads, Priority */
 	if (subopt_cpu != -1) {
 		trace_set_ux_task_to_prefer_cpu(task, "subopt",
 						*orig_target_cpu, subopt_cpu,
@@ -960,7 +960,7 @@ inline void oplus_check_preempt_wakeup(struct rq *rq, struct task_struct *p, boo
 		return;
 	}
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	if (!IS_ERR_OR_NULL(ots)) {
 		if (task_inlock(ots) && !task_skip_protect(p)) {
 			if (locking_protect_disable == false)
@@ -1030,7 +1030,7 @@ inline void oplus_check_preempt_wakeup(struct rq *rq, struct task_struct *p, boo
 }
 EXPORT_SYMBOL(oplus_check_preempt_wakeup);
 
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 bool is_spread_task_enabled(void)
 {
 	return (global_sched_assist_enabled & FEATURE_SPREAD) && !sched_assist_scene(SA_CAMERA);
@@ -1177,7 +1177,7 @@ void inc_ld_stats(struct task_struct *tsk, struct rq *rq)
 	curr_task_type = (ots->lb_state >> 1) & 0x7;
 
 	inc_task_lb(tsk, rq, curr_high_load, curr_task_type);
-	ots->ld_flag = -1;
+	set_bit(LD_FLAG_BIT, &ots->common_flags);
 }
 EXPORT_SYMBOL(inc_ld_stats);
 
@@ -1193,7 +1193,7 @@ void dec_ld_stats(struct task_struct *tsk, struct rq *rq)
 	curr_high_load = ots->lb_state & 0x1;
 	curr_task_type = (ots->lb_state >> 1) & 0x7;
 
-	ots->ld_flag = 0;
+	clear_bit(LD_FLAG_BIT, &ots->common_flags);
 	dec_task_lb(tsk, rq, curr_high_load, curr_task_type);
 }
 EXPORT_SYMBOL(dec_ld_stats);
@@ -1273,7 +1273,7 @@ void android_rvh_check_preempt_tick_handler(void *unused, struct task_struct *ta
 	struct oplus_task_struct *ots;
 	unsigned long irqflag;
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	check_preempt_tick_handler_locking(task, ideal_runtime, skip_preempt, delta_exec,
 		cfs_rq,	se, granularity);
 #endif
@@ -1326,7 +1326,7 @@ void android_rvh_enqueue_entity_handler(void *unused, struct cfs_rq *cfs, struct
 {
 	struct task_struct *p = entity_is_task(se) ? task_of(se) : NULL;
 	struct rq *rq = rq_of(cfs);
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	enqueue_locking_thread(rq, p);
 #endif
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
@@ -1338,7 +1338,7 @@ void android_rvh_dequeue_entity_handler(void *unused, struct cfs_rq *cfs, struct
 {
 	struct task_struct *p = entity_is_task(se) ? task_of(se) : NULL;
 	struct rq *rq = rq_of(cfs);
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	dequeue_locking_thread(rq, p);
 #endif
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
@@ -1369,7 +1369,7 @@ void android_rvh_replace_next_task_fair_handler(void *unused,
 		struct rq *rq, struct task_struct **p, struct sched_entity **se, bool *repick, bool simple, struct task_struct *prev)
 {
 	oplus_replace_next_task_fair(rq, p, se, repick, simple);
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	if (*repick != true)
 		oplus_replace_locking_task_fair(rq, p, se, repick, simple);
 #endif

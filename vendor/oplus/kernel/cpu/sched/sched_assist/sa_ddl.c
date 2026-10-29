@@ -69,7 +69,7 @@ void oplus_set_task_ddl(struct task_struct *task, u64 ddl)
 
 	if (!ddl) {
 		if (!oplus_rbnode_empty(&ots->ddl_node)) {
-			if (test_and_clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state))
+			if (test_and_clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags))
 				orq->nr_ddl_preempted--;
 			rb_erase_cached(&ots->ddl_node, &orq->ddl_root);
 			RB_CLEAR_NODE(&ots->ddl_node);
@@ -78,8 +78,8 @@ void oplus_set_task_ddl(struct task_struct *task, u64 ddl)
 	} else if (task->se.on_rq && !task_running(rq, task)) {
 		ots->runnable_ts = ots->enqueue_time;
 		if (oplus_rbnode_empty(&ots->ddl_node)) {
-			clear_bit(OTS_STATE_DDL_ACTIVE, &ots->state);
-			clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state);
+			clear_bit(OTS_STATE_DDL_ACTIVE, &ots->common_flags);
+			clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags);
 			WRITE_ONCE(ots->ddl_active_ts, 0);
 			get_task_struct(task);
 			rb_add_cached(&ots->ddl_node, &orq->ddl_root, runnable_at_comp);
@@ -148,12 +148,12 @@ void oplus_ddl_preempt_tint(struct rq *rq, struct task_struct *prev)
 
 	if (ots->ddl_active_ts) {
 		if (!oplus_ddl_within_limit(rq, prev)) {
-			if (test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state))
-				clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state);
+			if (test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags))
+				clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags);
 			return;
 		}
 
-		set_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state);
+		set_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags);
 		WRITE_ONCE(ots->ddl_active_ts, now - ots->ddl_active_ts);
 	}
 }
@@ -166,8 +166,8 @@ void oplus_task_ddl_tint(struct rq *rq, struct task_struct *next)
 	if (!oplus_get_task_ddl(next))
 		return;
 
-	if (!test_bit(OTS_STATE_DDL_ACTIVE, &ots->state)
-			&& !test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state))
+	if (!test_bit(OTS_STATE_DDL_ACTIVE, &ots->common_flags)
+			&& !test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags))
 		return;
 
 	/*
@@ -175,7 +175,7 @@ void oplus_task_ddl_tint(struct rq *rq, struct task_struct *next)
 	 * preempted active ddl task running time within limit after several
 	 * preemptions.
 	 */
-	if (unlikely(test_and_clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state))) {
+	if (unlikely(test_and_clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags))) {
 		WRITE_ONCE(ots->ddl_active_ts, now - ots->ddl_active_ts);
 		return;
 	}
@@ -203,7 +203,7 @@ void oplus_dequeue_ddl_node(struct rq *rq, struct task_struct *p)
 		 */
 		rb_erase_cached(&ots->ddl_node, &orq->ddl_root);
 		RB_CLEAR_NODE(&ots->ddl_node);
-		if (test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state))
+		if (test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags))
 			orq->nr_ddl_preempted--;
 		put_task_struct(p);
 	}
@@ -226,11 +226,11 @@ void oplus_enqueue_ddl_node(struct rq *rq, struct task_struct *p)
 	 * is used to keep ddl running time in preempted path and grows
 	 * automatically.
 	 */
-	clear_bit(OTS_STATE_DDL_ACTIVE, &ots->state);
+	clear_bit(OTS_STATE_DDL_ACTIVE, &ots->common_flags);
 	if (!p->se.on_rq) {
 		if (!task_on_rq_migrating(p)) {
 			ots->runnable_ts = now;
-			clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state);
+			clear_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags);
 		}
 		WRITE_ONCE(ots->ddl_active_ts, 0);
 	} else {
@@ -253,7 +253,7 @@ void oplus_enqueue_ddl_node(struct rq *rq, struct task_struct *p)
 
 	get_task_struct(p);
 	rb_add_cached(&ots->ddl_node, &orq->ddl_root, runnable_at_comp);
-	if (test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state))
+	if (test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags))
 		orq->nr_ddl_preempted++;
 	spin_unlock_irqrestore(&orq->ddl_lock, irqflag);
 }
@@ -290,7 +290,7 @@ static struct oplus_task_struct *pick_ddl_task(struct rq *rq, bool *active_preem
 			active_left = node;
 
 		if (ddl_runnable) {
-			if (test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->state)) {
+			if (test_bit(OTS_STATE_DDL_ACTIVE_PREEMPTED, &ots->common_flags)) {
 				*active_preempted = true;
 				goto out_unlock;
 			}
@@ -338,7 +338,7 @@ void oplus_replace_next_task_ddl(struct rq *rq, struct task_struct **p,
 		*p = ots->task;
 		*se = &ots->task->se;
 		*repick = true;
-		set_bit(OTS_STATE_DDL_ACTIVE, &ots->state);
+		set_bit(OTS_STATE_DDL_ACTIVE, &ots->common_flags);
 		update_ddl_hit_history(*p);
 	}
 }
