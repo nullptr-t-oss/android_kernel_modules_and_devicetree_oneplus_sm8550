@@ -3,7 +3,7 @@
  * Copyright (C) 2022 Oplus. All rights reserved.
  */
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 #ifndef _SCHED_ASSIST_LOCKING_H_
 #define _SCHED_ASSIST_LOCKING_H_
 

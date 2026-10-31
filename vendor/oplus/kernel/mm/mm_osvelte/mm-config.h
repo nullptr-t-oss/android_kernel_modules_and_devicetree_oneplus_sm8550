@@ -13,6 +13,7 @@ enum config_oplus_mm_feature_disable1 {
 	COMFD1_MGLRU_OPT = 2,
 	COMFD1_QPACE = 3,
 	COMFD1_DISABLE_TCACHE_OFF = 4,
+	COMFD1_FRR = 5,
 };
 
 static const char *module_name_uxmem_opt = "oplus_bsp_uxmem_opt";
@@ -39,6 +40,11 @@ struct config_ezreclaimd {
 
 static const char *module_name_kcompressed = "kcompressed";
 struct config_kcompressed {
+	bool enable;
+};
+
+static const char *module_name_frr = "oplus_bsp_frr";
+struct config_frr {
 	bool enable;
 };
 

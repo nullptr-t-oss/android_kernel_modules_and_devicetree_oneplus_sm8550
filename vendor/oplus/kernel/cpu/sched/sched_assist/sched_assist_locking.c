@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2022 Oplus. All rights reserved.
  */
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 #define pr_fmt(fmt) "dstate_opt: " fmt
 
 #include <linux/sched.h>

@@ -141,6 +141,18 @@ config OPLUS_SMART_STORAGE
 	help
 	  smart stroge 1.0 add for performance
 
+config OPLUS_FRR
+	tristate "file read record"
+	  default n
+	help
+	  record file read info
+
+config OPLUS_MM_FRR_DEBUG
+	tristate "file read record debug"
+	  default n
+	help
+	  record file read info debug
+
 source "mm/oplus_mm/hybridswap_zram/Kconfig"
 
 source "mm/oplus_mm/thp_zsmalloc/Kconfig"

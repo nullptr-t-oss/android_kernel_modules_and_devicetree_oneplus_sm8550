@@ -419,9 +419,9 @@ static void account_normalize_runtime_handler(void *data, struct rq *rq)
 	if (IS_ERR_OR_NULL(ots_cur) || !monitor_status)
 		return;
 
-	if (!ots_cur->is_update_runtime) {
+	if (!test_bit(IS_UPDATE_RUNTIME_BIT, &ots_cur->common_flags)) {
 		ots_cur->exec_calc_runtime = curr->se.sum_exec_runtime;
-		ots_cur->is_update_runtime = 1;
+		set_bit(IS_UPDATE_RUNTIME_BIT, &ots_cur->common_flags);
 	}
 
 	if (curr->se.sum_exec_runtime > ots_cur->exec_calc_runtime) {
@@ -461,9 +461,9 @@ static void update_runtime_handler(void *data, bool preempt, struct task_struct 
 	if (IS_ERR_OR_NULL(ots_prev) || IS_ERR_OR_NULL(ots_next) || !monitor_status)
 		return;
 
-	if (!ots_prev->is_update_runtime) {
+	if (!test_bit(IS_UPDATE_RUNTIME_BIT, &ots_prev->common_flags)) {
 		ots_next->exec_calc_runtime = next->se.sum_exec_runtime;
-		ots_next->is_update_runtime = 1;
+		set_bit(IS_UPDATE_RUNTIME_BIT, &ots_next->common_flags);
 	} else {
 		if (prev->se.sum_exec_runtime > ots_prev->exec_calc_runtime) {
 			delta = prev->se.sum_exec_runtime - ots_prev->exec_calc_runtime;
@@ -479,9 +479,10 @@ static void update_runtime_handler(void *data, bool preempt, struct task_struct 
 				atomic64_add(delta, &target_process_runtime[ots_prev->target_process]);
 		}
 		ots_prev->exec_calc_runtime = 0;
-		ots_prev->is_update_runtime = 0;
+		clear_bit(IS_UPDATE_RUNTIME_BIT, &ots_prev->common_flags);
+
 		ots_next->exec_calc_runtime = next->se.sum_exec_runtime;
-		ots_next->is_update_runtime = 1;
+		set_bit(IS_UPDATE_RUNTIME_BIT, &ots_next->common_flags);
 	}
 }
 

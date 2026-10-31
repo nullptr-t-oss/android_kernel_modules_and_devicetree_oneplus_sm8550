@@ -368,7 +368,6 @@ static bool _sde_encoder_is_autorefresh_enabled(
 			return true;
 	}
 #endif
-
 	return sde_connector_get_property(drm_conn->state,
 			CONNECTOR_PROP_AUTOREFRESH) ? true : false;
 }
@@ -3117,7 +3116,6 @@ static void _sde_encoder_setup_dither(struct sde_encoder_phys *phys)
 	num_lm = sde_rm_topology_get_num_lm(&sde_kms->rm, topology);
 	for (i = 0; i < num_lm; i++) {
 		hw_pp = sde_enc->hw_pp[i];
-
 #if defined(CONFIG_PXLW_IRIS)
 		if (iris_is_chip_supported() && (iris_pq_disable & 0x01)) {
 			phys->hw_pp->ops.setup_dither(phys->hw_pp, NULL, 0);

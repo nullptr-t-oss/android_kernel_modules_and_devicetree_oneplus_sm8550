@@ -1703,8 +1703,109 @@
                 "write": false,
                 "overwrite": false
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_BUCK_GET_VDM_INFO",
+            "desc": {
+                "zh": "获取vdm info"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["u32 *", "int *"],
+            "parameter_desc": [
+                {
+                    "range": "*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "vdm信息数组"
+                    }
+                },
+                {
+                    "range": "*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "vdm信息数量"
+                    }
+                }
+            ],
+            "vict": {
+                "read": {
+                    "cmd": "vict -f {id} -G vic-*",
+                    "desc": {
+                        "zh": "获取vdm info"
+                    }
+                },
+                "write": false,
+                "overwrite": {
+                    "cmd": "vict -f {id} -O {val} vic-*",
+                    "desc": {
+                        "zh": "使用val覆盖vdm info"
+                    }
+                }
+            }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_BUCK_SEND_GET_SINK_CAP",
+            "desc": {
+                "zh": "发送get_sink_cap命令"
+            },
+            "auto_debug_code": true,
+            "parameter_list": [],
+            "parameter_desc": [],
+            "vict": {
+                "read": false,
+                "write": {
+                    "cmd": "vict -f {id} -S vic-*",
+                    "desc": {
+                        "zh": "N/A"
+                    }
+                },
+                "overwrite": false
+            }
+        },
+        {
+           "lable": "OPLUS_IC_FUNC_BUCK_GET_TVS_CC_STATE",
+           "desc": {
+               "zh": "TVS异常获取CC1和CC2的状态"
+           },
+           "auto_debug_code": true,
+           "parameter_list": ["u8 *", "u8 *"],
+           "parameter_desc": [
+               {
+                   "range": "0-*",
+                   "type": "out",
+                   "desc": {
+                       "zh": "用于存放CC1状态值"
+                   }
+               },
+               {
+                   "range": "0-*",
+                   "type": "out",
+                   "desc": {
+                       "zh": "用于存放CC2的状态值"
+                   }
+               }
+            ],
+            "vict": {
+               "read": false,
+               "write": false,
+               "overwrite": false
+            }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_BUCK_SET_TVS_CC_OPEN",
+            "desc": {
+                "zh": "TVS异常设置CC为open状态"
+            },
+            "auto_debug_code": true,
+            "parameter_list": [],
+            "parameter_desc": [],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
         }
     ],
 
-    "version": "V7.0:62:970cbf146864b0e9f4f88e9cc70c96bec75af89f8906b0cec2ed830c65f8744b"
+    "version": "V8.1:66:ccbedf4a11045b18e34fb5b6f532ab7fcefb61336ba2f1c52be1267a7be1cf0d"
 }

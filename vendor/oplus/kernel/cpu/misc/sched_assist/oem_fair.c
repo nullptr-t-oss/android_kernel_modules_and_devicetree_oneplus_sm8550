@@ -59,7 +59,7 @@ void update_load_flag(struct task_struct *tsk, struct rq *rq)
 	int curr_task_type = 0;
 	struct oplus_task_struct *ots = get_oplus_task_struct(tsk);
 
-	if (IS_ERR_OR_NULL(ots) || !ots->ld_flag) {
+	if (IS_ERR_OR_NULL(ots) || !test_bit(LD_FLAG_BIT, &ots->common_flags)) {
 		return;
 	}
 

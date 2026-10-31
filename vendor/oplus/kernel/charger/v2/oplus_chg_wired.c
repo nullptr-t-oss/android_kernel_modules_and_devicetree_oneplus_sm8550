@@ -19,6 +19,7 @@
 #include <linux/regmap.h>
 #include <linux/list.h>
 #include <linux/power_supply.h>
+
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/boot_mode.h>
 #include <soc/oplus/device_info.h>
@@ -46,6 +47,7 @@
 #include <mt-plat/mtk_boot_common.h>
 #endif
 #include <oplus_chg_wls.h>
+#include <oplus_gamepad.h>
 
 #define PDQC_CONFIG_WAIT_TIME_MS	15000
 #define QC_CHECK_WAIT_TIME_MS		20000
@@ -696,7 +698,8 @@ static int oplus_wired_current_set(struct oplus_chg_wired *chip,
 		chg_info("dont set icl=500ma, keep icl setting in lk/uefi");
 	else
 		vote(chip->icl_votable, SPEC_VOTER, true, icl_ma, true);
-	if (!chip->authenticate || !chip->hmac) {
+	if (oplus_comm_is_non_standard_hmac_status(chip->comm_topic,
+			chip->authenticate, chip->hmac)) {
 		vote(chip->fcc_votable, NON_STANDARD_VOTER, true,
 		     spec->non_standard_ibatmax_ma, false);
 		chg_err("!authenticate or !hmac, set nonstandard current\n");
@@ -1796,6 +1799,7 @@ static void oplus_wired_plugin_work(struct work_struct *work)
 		vote(chip->icl_votable, PD_PDO_ICL_VOTER, false, 0, true);
 		vote(chip->icl_votable, COMMON_POWER_CHECK, false, 0, true);
 		vote(chip->icl_votable, WLS_TX_VOTER, false, 0, true);
+		vote(chip->icl_votable, SVOOC_SUSPEND_ICL_VOTER, false, 0, false);
 		chip->need_common_power_check = false;
 		chip->pd_retry_count = 0;
 		chip->qc_retry_count = 0;
@@ -1981,6 +1985,7 @@ static void oplus_wired_qc_check_work(struct work_struct *work)
 		chg_info("cpa protocol not qc, return\n");
 		return;
 	}
+
 	chip->chg_type = oplus_wired_get_chg_type();
 	if (chip->chg_type == OPLUS_CHG_USB_TYPE_QC2 ||
 	    chip->chg_type == OPLUS_CHG_USB_TYPE_QC3) {
@@ -2027,6 +2032,7 @@ static void oplus_wired_pd_check_work(struct work_struct *work)
 		chg_info("cpa protocol not pd, return\n");
 		return;
 	}
+
 	chip->chg_type = oplus_wired_get_chg_type();
 	if (chip->chg_type < 0)
 		chip->chg_type = OPLUS_CHG_USB_TYPE_UNKNOWN;
@@ -3320,6 +3326,7 @@ static int oplus_wired_probe(struct platform_device *pdev)
 	oplus_mms_wait_topic("dischg_boost", oplus_wired_subscribe_dischg_boost_topic, chip);
 	if (chip->spec.wls_tx_limit_wired_icl != 0)
 		oplus_mms_wait_topic("wireless", oplus_wired_subscribe_wlschg_topic, chip);
+	oplus_gamepad_init();
 
 #if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP)
 	oplus_mms_wait_topic("state_keep", oplus_wired_subscribe_keep_topic, chip);
@@ -3382,6 +3389,7 @@ static int oplus_wired_remove(struct platform_device *pdev)
 	destroy_votable(chip->input_suspend_votable);
 	destroy_votable(chip->icl_votable);
 	destroy_votable(chip->fcc_votable);
+	oplus_gamepad_exit();
 	for (i = 0; i < OPLUS_WIRED_CHG_MODE_MAX; i++) {
 		if (chip->config.strategy_data[i])
 			devm_kfree(&pdev->dev, chip->config.strategy_data[i]);

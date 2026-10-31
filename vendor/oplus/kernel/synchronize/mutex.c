@@ -115,9 +115,12 @@ static void mutex_update_ux_cnt_when_add(struct mutex *lock)
 		return;
 
 	/* Record the ux flag when task is added to waiter list */
-	ots->lkinfo.is_block_ux = (ots->ux_state & SCHED_ASSIST_UX_MASK) || (current->prio < MAX_RT_PRIO);
-	if (ots->lkinfo.is_block_ux)
+	if ((ots->ux_state & SCHED_ASSIST_UX_MASK) || (current->prio < MAX_RT_PRIO)) {
+		set_bit(IS_BLOCK_UX_BIT, &ots->lkinfo.state_flags);
 		atomic_long_inc(&om->count);
+	} else {
+		clear_bit(IS_BLOCK_UX_BIT, &ots->lkinfo.state_flags);
+	}
 }
 
 static void mutex_update_ux_cnt_when_remove(struct mutex *lock)
@@ -134,11 +137,10 @@ static void mutex_update_ux_cnt_when_remove(struct mutex *lock)
 	 * care about the current ux flag. This avoids the corruption
 	 * of the number caused by ux change when in waiter list.
 	 */
-	if (ots->lkinfo.is_block_ux) {
+	if (test_and_clear_bit(IS_BLOCK_UX_BIT, &ots->lkinfo.state_flags)) {
 		/* Count == 0! Something is wrong! */
 		WARN_ON_ONCE(!atomic_long_read(&om->count));
 		atomic_long_add(-1, &om->count);
-		ots->lkinfo.is_block_ux = false;
 	}
 }
 #endif

@@ -428,8 +428,8 @@ static struct task_struct* remove_task_from_frame_group(struct task_struct *tsk)
 			grp->render_pid = 0;
 		}
 
-		if (ots->fbg_running) {
-			ots->fbg_running = false;
+		if (test_bit(FBG_RUNNING_BIT, &ots->common_flags)) {
+			clear_bit(FBG_RUNNING_BIT, &ots->common_flags);
 			grp->nr_running--;
 			if (unlikely(grp->nr_running < 0))
 				grp->nr_running = 0;
@@ -478,8 +478,8 @@ static void clear_all_static_frame_task(struct frame_group *grp, struct list_hea
 				grp->render_pid = 0;
 			}
 
-			if (ots->fbg_running) {
-				ots->fbg_running = false;
+			if (test_bit(FBG_RUNNING_BIT, &ots->common_flags)) {
+				clear_bit(FBG_RUNNING_BIT, &ots->common_flags);
 				grp->nr_running--;
 				if (unlikely(grp->nr_running < 0))
 					grp->nr_running = 0;
@@ -2025,7 +2025,7 @@ static void update_group_nr_running(struct task_struct *p, int event)
 
 	raw_spin_lock_irqsave(lock, flags);
 	if (event == PICK_NEXT_TASK && (ots->fbg_state & STATIC_FRAME_TASK)) {
-		ots->fbg_running = true;
+		set_bit(FBG_RUNNING_BIT, &ots->common_flags);
 		grp->nr_running++;
 		if (grp->nr_running == 1)
 			grp->mark_start = max(grp->mark_start, fbg_ktime_get_ns());
@@ -2033,8 +2033,8 @@ static void update_group_nr_running(struct task_struct *p, int event)
 			trace_printk("group_id=%d, next->comm=%s, next->tid=%d, nr_running=%d, mark_start=%llu\n",
 				group_id, p->comm, p->pid, grp->nr_running, grp->mark_start);
 		}
-	} else if (event == PUT_PREV_TASK && ots->fbg_running) {
-		ots->fbg_running = false;
+	} else if (event == PUT_PREV_TASK && test_bit(FBG_RUNNING_BIT, &ots->common_flags)) {
+		clear_bit(FBG_RUNNING_BIT, &ots->common_flags);
 		grp->nr_running--;
 		if (unlikely(grp->nr_running < 0))
 			grp->nr_running = 0;
@@ -2690,7 +2690,7 @@ static void fbg_sched_fork_hook(void *unused, struct task_struct *tsk)
 
 	ots->fbg_state = NONE_FRAME_TASK;
 	ots->fbg_depth = INVALID_FBG_DEPTH;
-	ots->fbg_running = false;
+	clear_bit(FBG_RUNNING_BIT, &ots->common_flags);
 	ots->preferred_cluster_id = -1;
 	INIT_LIST_HEAD(&ots->fbg_list);
 	raw_spin_lock_init(&ots->fbg_list_entry_lock);

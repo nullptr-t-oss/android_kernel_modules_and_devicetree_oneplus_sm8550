@@ -23,7 +23,7 @@
 #include <linux/profile.h>
 #include <linux/kprobes.h>
 #include <linux/cgroup.h>
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 #include <linux/cpuhotplug.h>
 #endif /* CONFIG_OPLUS_FEATURE_SCHED_SPREAD */
 
@@ -54,7 +54,7 @@
 #include "sched_assist.h"
 #include "sa_common.h"
 #include "sa_priority.h"
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 #include "sched_assist_locking.h"
 #endif
 
@@ -685,7 +685,7 @@ int is_vip_mvp(struct task_struct *p)
 	if (IS_ERR_OR_NULL(ots))
 		return false;
 
-	return atomic_read(&ots->is_vip_mvp);
+	return test_bit(IS_VIP_MVP_BIT, &ots->common_flags);
 }
 
 void ux_state_systrace_c(unsigned int cpu, struct task_struct *p)
@@ -782,7 +782,7 @@ void sched_info_systrace_c(unsigned int cpu, struct task_struct *p)
 	unsigned int cfs_running = cfs_rq->h_nr_running;
 	unsigned int rt_running = rt_rq->rt_nr_running;
 	struct oplus_task_struct *ots = get_oplus_task_struct(p);
-	int ddl_hint = ots && test_bit(OTS_STATE_DDL_ACTIVE, &ots->state) ? 1 : 0;
+	int ddl_hint = ots && test_bit(OTS_STATE_DDL_ACTIVE, &ots->common_flags) ? 1 : 0;
 	int ddl_task = 0;
 	u64 s_info = 0;
 	char buf[256];
@@ -812,7 +812,7 @@ void sched_info_systrace_c(unsigned int cpu, struct task_struct *p)
 	s_info += ddl_task * DDL_TASK_MULT_UNIT;
 	s_info += ((u8)cpumask_bits(&p->cpus_mask)[0]) * AFFINITY_MASK_MULT_UNIT;
 	if (cpumask_weight(&p->cpus_mask) < nr_cpu_ids) {
-		if (ots && likely(test_bit(OTS_STATE_SET_AFFINITY, &ots->state))
+		if (ots && likely(test_bit(OTS_STATE_SET_AFFINITY, &ots->common_flags))
 			&& ots->affinity_pid > 0 && ots->affinity_pid < PID_MAX_LIMIT)
 			s_info += ((u64)ots->affinity_pid) * AFFINITY_SET_MULT_UNIT;
 	}
@@ -852,6 +852,7 @@ void qs_info_systrace_c(unsigned int cpu, struct task_struct *p)
 		per_cpu(prev_qs_info, cpu) = s_info;
 	}
 }
+
 void sa_scene_systrace_c(void)
 {
 	static int prev_ux_scene;
@@ -907,7 +908,7 @@ void sched_assist_init_oplus_rq(void)
 		spin_lock_init(&orq->ddl_lock);
 #endif
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 		INIT_LIST_HEAD(&orq->locking_thread_list);
 		orq->locking_list_lock = kmalloc(sizeof(spinlock_t), GFP_KERNEL);
 		spin_lock_init(orq->locking_list_lock);
@@ -918,7 +919,7 @@ void sched_assist_init_oplus_rq(void)
 		orq->lb.pid = INVALID_PID;
 #endif
 
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 		per_cpu(task_lb_count, cpu_of(rq)).ux_low = 0;
 		per_cpu(task_lb_count, cpu_of(rq)).ux_high = 0;
 		per_cpu(task_lb_count, cpu_of(rq)).top_low = 0;
@@ -932,7 +933,7 @@ void sched_assist_init_oplus_rq(void)
 		WRITE_ONCE(rq->android_oem_data1[ORQ_IDX], (u64) orq);
 	}
 
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 	cpumask_clear(&nr_mask);
 #endif /* CONFIG_OPLUS_FEATURE_SCHED_SPREAD */
 }
@@ -1427,7 +1428,7 @@ void sched_assist_target_comm(struct task_struct *task, const char *buf)
 
 	strlcpy(comm, buf, sizeof(comm));
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	if (locking_protect_disable == false) {
 		if (strstr(buf, "kernel_net_tes")) {
 			locking_protect_disable = true;
@@ -1686,7 +1687,7 @@ ssize_t oplus_show_cpus(const struct cpumask *mask, char *buf)
 	return i;
 }
 
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 void sa_spread_systrace_c(void)
 {
 	static int prev_ux_spread;
@@ -1728,12 +1729,6 @@ void android_rvh_find_lowest_rq_handler(void *unused,
 		*best_cpu = task_cpu(p);
 	else
 		*best_cpu = cpumask_first(local_cpu_mask);
-}
-
-/* register vender hook in kernel/sched/core.c */
-void android_rvh_sched_fork_handler(void *unused, struct task_struct *p)
-{
-	init_task_ux_info(p);
 }
 
 void android_rvh_enqueue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags)
@@ -1782,7 +1777,7 @@ void android_rvh_schedule_handler(void *unused, struct task_struct *prev, struct
 		qs_info_systrace_c(cpu_of(rq), next);
 	}
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	locking_tick_hit(prev, next);
 	if (unlikely(global_debug_enabled & DEBUG_SYSTRACE) && likely(prev != next))
 		locking_state_systrace_c(cpu_of(rq), next);
@@ -1795,14 +1790,14 @@ void android_rvh_schedule_handler(void *unused, struct task_struct *prev, struct
 
 void android_vh_scheduler_tick_handler(void *unused, struct rq *rq)
 {
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 	update_rq_nr_imbalance(smp_processor_id());
 #endif /* CONFIG_OPLUS_FEATURE_SCHED_SPREAD */
 
 	if (unlikely(global_debug_enabled & DEBUG_SYSTRACE)) {
 		if (cpu_of(rq) == 0) {
 			sa_scene_systrace_c();
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 			sa_spread_systrace_c();
 #endif /* CONFIG_OPLUS_FEATURE_SCHED_SPREAD */
 		}
@@ -1816,7 +1811,7 @@ void android_vh_scheduler_tick_handler(void *unused, struct rq *rq)
 
 static int boost_kill = 1;
 module_param_named(boost_kill, boost_kill, uint, 0644);
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 module_param_named(locking_wakeup_preepmt_enable, locking_wakeup_preepmt_enable, uint, 0644);
 #endif
 int get_grp(struct task_struct *p)
@@ -1898,7 +1893,7 @@ void sched_setaffinity_tracking(struct task_struct *task, const struct cpumask *
 		return;
 
 	if (cpumask_weight(in_mask) == nr_cpu_ids) {
-		clear_bit(OTS_STATE_SET_AFFINITY, &ots->state);
+		clear_bit(OTS_STATE_SET_AFFINITY, &ots->common_flags);
 		ots->affinity_pid = ots->affinity_tgid = -1;
 	} else {
 		rcu_read_lock();
@@ -1910,7 +1905,7 @@ void sched_setaffinity_tracking(struct task_struct *task, const struct cpumask *
 
 		ots->affinity_pid = affinity_pid;
 		ots->affinity_tgid = affinity_tgid;
-		set_bit(OTS_STATE_SET_AFFINITY, &ots->state);
+		set_bit(OTS_STATE_SET_AFFINITY, &ots->common_flags);
 	}
 }
 

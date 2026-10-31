@@ -7,7 +7,7 @@
 #ifndef _OPLUS_SA_FAIR_H_
 #define _OPLUS_SA_FAIR_H_
 
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 #define SA_CGROUP_DEFAULT		(1)
 #define SA_CGROUP_FOREGROUND		(2)
 #define SA_CGROUP_BACKGROUND		(3)
@@ -56,7 +56,7 @@ bool oplus_cpu_halted(unsigned int cpu);
 void init_ux_halt_mask(struct cpumask *halt_mask);
 #endif
 
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_SPREAD)
 void init_rq_cpu(int cpu);
 int task_lb_sched_type(struct task_struct *tsk);
 void dec_task_lb(struct task_struct *tsk, struct rq *rq,

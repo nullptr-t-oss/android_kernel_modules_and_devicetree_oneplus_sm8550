@@ -39,7 +39,11 @@
 #define I2C_ERR_MAX 2
 #endif
 
-#define BC12_TIMEOUT_MS		msecs_to_jiffies(5000)
+#define BC12_TIMEOUT_MS			msecs_to_jiffies(5000)
+#define BC12_RE_CHECK_MS		msecs_to_jiffies(50)
+#define BC12_HW_DET_CNT_MAX		10
+#define PLUGOUT_VBUS_TH_MV		3000
+#define BC12_COMPLETE_COMP_CHECK_MS	2500
 
 #define REG_MAX 0x0b
 
@@ -90,12 +94,25 @@ struct sgm41515_chip {
 	bool bc12_complete;
 	bool event_irq_enabled;
 	bool power_good;
+	bool cp_supported;
 	int charge_type;
 	int bc12_delay_cnt;
 	int hw_aicl_point;
 	int sw_aicl_point;
 	int part_id;
 	int bc12_retried;
+	int bc12_hw_detect_count;
+	bool usb_aicl_enhance;
+	struct votable *wired_fcc_votable;
+	struct votable *wired_icl_votable;
+	struct work_struct rerun_votable_work;
+	struct tcpc_device *tcpc;
+	struct completion resume_done;
+	struct completion bc12_complete_comp;
+#if (!IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP))
+	struct delayed_work cc_sta_check_work;
+	int cc_detached_timeout_counter;
+#endif
 };
 
 enum {
@@ -831,6 +848,194 @@ static void oplus_keep_resume_wakelock(struct sgm41515_chip *chip, bool awake)
 	return;
 }
 
+static bool is_sgm41515_dpdm_detection_done(struct sgm41515_chip *chip)
+{
+	bool det_done = false;
+	int rc = 0;
+	u8 reg07_val = 0;
+	u8 reg0e_val = 0;
+
+	if (!chip) {
+		chg_err("Couldn't get chip");
+		return false;
+	}
+
+	if (atomic_read(&chip->charger_suspended) == 1) {
+		chg_err("charger is suspended");
+		return false;
+	}
+
+	rc = sgm41515_read_byte(chip, REG07_SGM41515_ADDRESS, &reg07_val);
+	if (rc) {
+		chg_err("Couldn't read REG07_SGM41515_ADDRESS rc = %d\n", rc);
+		return false;
+	}
+
+	rc = sgm41515_read_byte(chip, REG0E_SGM41515_ADDRESS, &reg0e_val);
+	if (rc) {
+		chg_err("Couldn't read REG0E_SGM41515_ADDRESS rc = %d\n", rc);
+		return false;
+	}
+
+	det_done = (((reg07_val & REG07_SGM41515_IINDET_EN_MASK) == REG07_SGM41515_IINDET_EN_DET_COMPLETE) &&
+		    ((reg0e_val & REG0E_SGM41515_REG_INPUT_DET_MASK) == REG0E_SGM41515_REG_INPUT_DET_MASK));
+
+	return det_done;
+}
+
+static void sgm41515_bc12_clear_detection_status(struct sgm41515_chip *chip)
+{
+	is_sgm41515_dpdm_detection_done(chip);
+}
+
+static void sgm41515_bc12_plugin_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct sgm41515_chip *chip = container_of(dwork, struct sgm41515_chip, bc12_plugin_work);
+	bool bc12_detect_done = is_sgm41515_dpdm_detection_done(chip);
+
+	if (chip->bc12_hw_detect_count >= BC12_HW_DET_CNT_MAX || bc12_detect_done) {
+		chip->bc12_retried++;
+		sgm41515_input_current_limit_without_aicl(chip, REG00_SGM41515_INIT_INPUT_CURRENT_LIMIT_500MA);
+		chg_info("first bc12 is done, run bc12 retry\n");
+		sgm41515_get_bc12(chip);
+	} else {
+		if (chip->bc12_hw_detect_count < BC12_HW_DET_CNT_MAX)
+			chip->bc12_hw_detect_count++;
+		chg_info("dpdm detection not done, wait next bc12 retry cycle\n");
+		schedule_delayed_work(&chip->bc12_plugin_work, BC12_RE_CHECK_MS);
+	}
+}
+
+static int sgm41515_get_vooc_sid(struct sgm41515_chip *chip)
+{
+	union mms_msg_data data = { 0 };
+	int vooc_sid = 0;
+
+	if (!chip->vooc_topic)
+		chip->vooc_topic = oplus_mms_get_by_name("vooc");
+
+	if (chip->vooc_topic) {
+		oplus_mms_get_item_data(chip->vooc_topic, VOOC_ITEM_SID, &data, true);
+		vooc_sid = (unsigned int)data.intval;
+	} else {
+		chg_err("vooc_topic is null\n");
+		return 0;
+	}
+
+	chg_info("sgm41515_get_vooc_sid: %d\n", sid_to_adapter_chg_type(vooc_sid));
+	return sid_to_adapter_chg_type(vooc_sid);
+}
+
+static void sgm41515_vbus_check_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct sgm41515_chip *chip =
+		container_of(dwork, struct sgm41515_chip, vbus_check_work);
+	int chg_vol = 0;
+
+	chg_vol = oplus_wired_get_vbus();
+
+	if (chg_vol < PLUGOUT_VBUS_TH_MV) {
+		chg_info("chg_vol=%d, detech changed, continue processing\n", chg_vol);
+		chip->power_good = true;
+		schedule_delayed_work(&chip->event_work, 0);
+	} else {
+		chg_info("chg_vol=%d, vooc started, skip irq handle\n", chg_vol);
+	}
+}
+
+static bool is_tcpc_available(struct sgm41515_chip *chip)
+{
+	if (!chip)
+		return false;
+
+	if (!chip->tcpc)
+		chip->tcpc = tcpc_dev_get_by_name("type_c_port0");
+	return !!chip->tcpc;
+}
+
+#if (!IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP))
+#define CC_DETECTED_TIMEOUT_MS				290
+#define CC_DETECTED_CHECK_INTERVAL_MS			10
+#define CC_DETECTED_TIMEOUT_CNT				2
+#define CC_DETECTED_TIMEOUT_ICL_MA			2000
+
+static void sgm41515_cc_sta_check_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct sgm41515_chip *chip = container_of(dwork, struct sgm41515_chip, cc_sta_check_work);
+	unsigned int check_cnt = CC_DETECTED_TIMEOUT_MS / CC_DETECTED_CHECK_INTERVAL_MS;
+	unsigned int i;
+	uint8_t cc1 = 0, cc2 = 0;
+
+	for (i = 0; i < check_cnt; i++) {
+		usleep_range(CC_DETECTED_CHECK_INTERVAL_MS * 1000,
+				(CC_DETECTED_CHECK_INTERVAL_MS + 1) * 1000);
+
+		if (is_tcpc_available(chip))
+			tcpm_inquire_remote_cc(chip->tcpc, &cc1, &cc2, true);
+
+		if (cc1 == 0 && cc2 == 0) {
+			chip->cc_detached_timeout_counter = 0;
+			return;
+		}
+	}
+
+	chip->cc_detached_timeout_counter++;
+}
+#endif
+
+static void sgm41515_plug_in_event_handle(struct sgm41515_chip *chip)
+{
+	oplus_chg_ic_virq_trigger(chip->ic_dev, OPLUS_IC_VIRQ_PLUGIN);
+	oplus_chg_wakelock(chip, true);
+	sgm41515_request_dpdm(chip, true);
+	chip->bc12_complete = false;
+	chip->bc12_retry = 0;
+	chip->bc12_delay_cnt = 0;
+	sgm41515_set_wdt_timer(chip, REG05_SGM41515_WATCHDOG_TIMER_40S);
+	if (chip->charge_type == POWER_SUPPLY_TYPE_UNKNOWN)
+		schedule_delayed_work(&chip->bc12_plugin_work, 0);
+#if (!IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP))
+	cancel_delayed_work(&chip->cc_sta_check_work);
+#endif
+}
+
+static void sgm41515_plug_out_event_handle(struct sgm41515_chip *chip)
+{
+	if (is_tcpc_available(chip) && tcpm_inquire_typec_attach_state(chip->tcpc)== TYPEC_ATTACHED_SNK &&
+	    sgm41515_get_vooc_sid(chip) == CHARGER_TYPE_VOOC) {
+		schedule_delayed_work(&chip->vbus_check_work, msecs_to_jiffies(INIT_WORK_OTHER_DELAY));
+		chg_info("vooc or plugout, delay vbus_check_work and skip irq handle\n");
+		return;
+	}
+	sgm41515_set_wdt_timer(chip, REG05_SGM41515_WATCHDOG_TIMER_DISABLE);
+	oplus_chg_ic_virq_trigger(chip->ic_dev, OPLUS_IC_VIRQ_PLUGIN);
+	chip->bc12_complete = false;
+	reinit_completion(&chip->bc12_complete_comp);
+	chip->bc12_retried = 0;
+	chip->bc12_delay_cnt = 0;
+	chip->charge_type = POWER_SUPPLY_TYPE_UNKNOWN;
+	sgm41515_request_dpdm(chip, false);
+	chip->bc12_hw_detect_count = 0;
+	sgm41515_bc12_clear_detection_status(chip);
+	cancel_delayed_work(&chip->bc12_plugin_work);
+#if (!IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP))
+	schedule_delayed_work(&chip->cc_sta_check_work, 0);
+#endif
+	oplus_chg_wakelock(chip, false);
+}
+
+static void sgm41515_no_plug_event_handle(struct sgm41515_chip *chip)
+{
+	chg_err("prev_pg & now_pg is false\n");
+	chip->bc12_complete = false;
+	reinit_completion(&chip->bc12_complete_comp);
+	chip->bc12_retried = 0;
+	chip->bc12_delay_cnt = 0;
+}
+
 #define OPLUS_WAIT_RESUME_TIME	200
 static void sgm41515_event_work(struct work_struct *work)
 {
@@ -1436,6 +1641,22 @@ static int sgm41515_set_chging_term_disable(struct sgm41515_chip *chip)
 	return rc;
 }
 
+static bool sgm41515_is_cp_supported(struct sgm41515_chip *chip)
+{
+	if (!chip)
+		return false;
+
+	/* Check if the project supports Charge Pump (CP) fast charging */
+	if (!chip->cp_supported) {
+		chip->cp_supported =
+			oplus_chg_ic_find_by_name("oplus,virtual_cp") != NULL;
+		chg_info("cp_supported %s\n",
+			chip->cp_supported ? "found, cp project" : "not found, non-cp project");
+	}
+
+	return chip->cp_supported;
+}
+
 static int sgm41515_suspend_charger(struct sgm41515_chip *chip)
 {
 	int rc = 0;
@@ -1448,8 +1669,11 @@ static int sgm41515_suspend_charger(struct sgm41515_chip *chip)
 
 	atomic_set(&chip->is_suspended, 1);
 
-	rc = sgm41515_disable_charging(chip);
-	rc = sgm41515_input_current_limit_without_aicl(chip, 100);
+	rc |= sgm41515_disable_charging(chip);
+	if (sgm41515_is_cp_supported(chip))
+		rc |= sgm41515_enable_hiz_mode(chip, true);
+	else
+		rc |= sgm41515_input_current_limit_without_aicl(chip, 100);
 
 	return rc;
 }
@@ -1465,7 +1689,9 @@ static int sgm41515_unsuspend_charger(struct sgm41515_chip *chip)
 		return 0;
 
 	atomic_set(&chip->is_suspended, 0);
-	rc = sgm41515_enable_charging(chip);
+	rc |= sgm41515_enable_charging(chip);
+	if (sgm41515_is_cp_supported(chip))
+		rc |= sgm41515_enable_hiz_mode(chip, false);
 
 	return rc;
 }
@@ -1488,6 +1714,9 @@ static int sgm41515_input_suspend(struct oplus_chg_ic_dev *ic_dev, bool suspend)
 		return 0;
 
 	if (suspend) {
+		if (sgm41515_is_cp_supported(chip) &&
+		    !wait_for_completion_timeout(&chip->bc12_complete_comp, msecs_to_jiffies(BC12_COMPLETE_COMP_CHECK_MS)))
+			chg_err("bc12 completion timeout, proceed suspend anyway\n");
 		rc = sgm41515_suspend_charger(chip);
 	} else {
 		rc = sgm41515_unsuspend_charger(chip);
@@ -1567,6 +1796,22 @@ static int sgm41515_set_icl(struct oplus_chg_ic_dev *ic_dev, bool vooc_mode, boo
 		return -ENODEV;
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
+
+#if (!IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP))
+	if (chip->cc_detached_timeout_counter >= CC_DETECTED_TIMEOUT_CNT) {
+		if (icl_ma > CC_DETECTED_TIMEOUT_ICL_MA) {
+			chg_info("cc_detached_timeout_counter = %d, icl_ma = %d, new icl_ma = %d\n",
+					chip->cc_detached_timeout_counter,
+					icl_ma, CC_DETECTED_TIMEOUT_ICL_MA);
+			icl_ma = CC_DETECTED_TIMEOUT_ICL_MA;
+		}
+	}
+#endif
+
+	if (!chip->bc12_complete && step) {
+		chg_info("bc12_complete = %d, skip aicl\n", chip->bc12_complete);
+		return rc;
+	}
 
 	if (step)
 		rc = sgm41515_input_current_limit_write(chip, icl_ma);
@@ -2674,6 +2919,405 @@ static int sgm41515_parse_dt(struct sgm41515_chip *chip)
 	return 0;
 }
 #endif
+
+#define THERMAL_TEMP_DEFAULT_VALUE 25000
+static int oplus_ntc_convert(int volt, int compensation)
+{
+	int i;
+	int size;
+	size = ARRAY_SIZE(chg_ntc_temp_table) - 1;
+	for (i = 1; i <= size; (i = i + 2)) {
+		if (i >= size || chg_ntc_temp_table[i] <= volt)
+			break;
+	}
+	if (i >= size)
+		i = size;
+	i = i -1;
+
+	return chg_ntc_temp_table[i] * 1000;
+}
+
+static int oplus_chg_v2_get_chg_temp(struct thermal_zone_device *tz, int *temp)
+{
+	int rc;
+	int ntcctrl_gpio_value;
+	int chg_thermal_vol;
+	struct sgm41515_chip *chip;
+
+	if (!temp) {
+		chg_err("temp is null\n");
+		return 0;
+	}
+
+	if (IS_ERR_OR_NULL(tz) || !tz->devdata) {
+		chg_err("tz is null\n");
+		*temp = THERMAL_TEMP_DEFAULT_VALUE;
+		return 0;
+	}
+	chip = (struct sgm41515_chip *)tz->devdata;
+
+	if (!chip || IS_ERR_OR_NULL(chip->chg_temp_adc)) {
+		chg_err("chip is null\n");
+		*temp = THERMAL_TEMP_DEFAULT_VALUE;
+		return 0;
+	}
+
+	if (gpio_is_valid(chip->ntcctrl_gpio_amux)) {
+		ntcctrl_gpio_value = gpio_get_value(chip->ntcctrl_gpio_amux);
+		if (ntcctrl_gpio_value) {
+			*temp = THERMAL_TEMP_DEFAULT_VALUE;
+			return 0;
+		}
+	}
+
+	rc = iio_read_channel_processed(chip->chg_temp_adc, &chg_thermal_vol);
+	if (rc < 0) {
+		chg_err("[%s]fail to read chg temp adc rc = %d\n", __func__, rc);
+		*temp = THERMAL_TEMP_DEFAULT_VALUE;
+		return 0;
+	}
+
+	chg_thermal_vol = chg_thermal_vol / 1000;
+	*temp = oplus_ntc_convert(chg_thermal_vol, 0);
+
+	chg_debug("chg_vol:%d chg_temp:%d,\n", chg_thermal_vol, *temp);
+
+	return 0;
+}
+
+
+static struct thermal_zone_device_ops charger_temp_ops = {
+	.get_temp = oplus_chg_v2_get_chg_temp,
+};
+
+static int register_charger_thermal(struct sgm41515_chip *chip)
+{
+	int ret = 0;
+
+	if (!chip) {
+		chg_err("chip not ready!\n");
+		return -ENODEV;
+	}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	chip->tz_dev = thermal_tripless_zone_device_register("charger_temp_v2",
+			chip, &charger_temp_ops, NULL);
+#else
+	chip->tz_dev = thermal_zone_device_register("charger_temp_v2",
+			0, 0, chip, &charger_temp_ops, NULL, 0, 0);
+#endif
+	if (IS_ERR(chip->tz_dev)) {
+		chg_err("charger_temp register fail");
+		return -ENODEV;
+	}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+	ret = thermal_zone_device_enable(chip->tz_dev);
+	if (ret) {
+		thermal_zone_device_unregister(chip->tz_dev);
+		chg_err("thermal_zone_device_enable fail\n");
+	}
+#endif
+	return ret;
+}
+
+static int oplus_v2_ntc_switch_gpio_init(struct sgm41515_chip *chip)
+{
+	int rc;
+	struct device_node *node;
+
+	if (!chip) {
+		chg_err("ntc_switch not ready!\n");
+		return -EINVAL;
+	}
+
+	node = chip->dev->of_node;
+
+	rc = of_property_match_string(node, "io-channel-names", "chg_temp_adc");
+	if (rc >= 0) {
+		chip->chg_temp_adc = iio_channel_get(chip->dev, "chg_temp_adc");
+		if (IS_ERR(chip->chg_temp_adc)) {
+			rc = PTR_ERR(chip->chg_temp_adc);
+			chg_err("chg_temp_adc get error, rc=%d\n", rc);
+			chip->chg_temp_adc = NULL;
+			goto err;
+		}
+	} else {
+		chg_err("chg_temp_adc not found\n");
+		chip->chg_temp_adc = NULL;
+		goto err;
+	}
+
+	rc = read_signed_data_from_node(node, "chg_ntc_para", (s32 *)chg_ntc_temp_table,
+		CHG_NTC_TEMP_COUNT);
+	if (rc < 0) {
+		chg_err("get ntc para fail  rc:%d\n", rc);
+		goto release_adc_channel;
+	}
+
+	chip->ntcctrl_gpio_amux = of_get_named_gpio(node, "qcom,ntc-switch-gpio-amux", 0);
+	if (chip->ntcctrl_gpio_amux < 0)
+		chg_err("chip->ntcctrl_gpio not specified\n");
+	else
+		chg_info("chip->ntcctrl_gpio_amux = %d\n", chip->ntcctrl_gpio_amux);
+
+	if (gpio_is_valid(chip->ntcctrl_gpio_amux)) {
+		rc = gpio_request(chip->ntcctrl_gpio_amux, "ntc-switch-gpio_amux");
+		if (rc) {
+			chg_err("unable to request gpio [%d]\n", rc);
+			goto release_adc_channel;
+		}
+	}
+
+	return 0;
+
+release_adc_channel:
+	if (!IS_ERR_OR_NULL(chip->chg_temp_adc)) {
+		iio_channel_release(chip->chg_temp_adc);
+		chip->chg_temp_adc = NULL;
+	}
+err:
+	chg_err("thermal adc and gpio init fail!\n");
+	return -1;
+}
+
+static void release_charger_thermal_resource(struct sgm41515_chip *chip)
+{
+	if (!chip) {
+		chg_err("chip not ready!\n");
+		return;
+	}
+
+	if (!IS_ERR_OR_NULL(chip->tz_dev)) {
+		thermal_zone_device_unregister(chip->tz_dev);
+		chip->tz_dev = NULL;
+	}
+	if (!IS_ERR_OR_NULL(chip->chg_temp_adc)) {
+		iio_channel_release(chip->chg_temp_adc);
+		chip->chg_temp_adc = NULL;
+	}
+	if (gpio_is_valid(chip->ntcctrl_gpio_amux)) {
+		gpio_free(chip->ntcctrl_gpio_amux);
+	}
+}
+
+static void sgm41515_free_gpio(struct sgm41515_chip *chip)
+{
+	if (!chip) {
+		chg_err("chip not ready!\n");
+		return;
+	}
+
+	sgm41515_enable_irq(chip, false);
+	if (gpio_is_valid(chip->event_gpio)) {
+		gpio_free(chip->event_gpio);
+		chip->event_gpio = -EINVAL;
+	}
+	if (gpio_is_valid(chip->usbtemp_dischg_gpio)) {
+		gpio_free(chip->usbtemp_dischg_gpio);
+		chip->usbtemp_dischg_gpio =  -EINVAL;
+	}
+	if (gpio_is_valid(chip->dis_vbus_gpio)) {
+		gpio_free(chip->dis_vbus_gpio);
+		chip->dis_vbus_gpio = -EINVAL;
+	}
+}
+
+static void sgm41515_free_wakeup_source(struct sgm41515_chip *chip)
+{
+	if (!chip) {
+		chg_err("chip not ready!\n");
+		return;
+	}
+
+	if (chip->suspend_ws) {
+		wakeup_source_unregister(chip->suspend_ws);
+		chip->suspend_ws = NULL;
+	}
+	if (chip->keep_resume_ws) {
+		wakeup_source_unregister(chip->keep_resume_ws);
+		chip->keep_resume_ws = NULL;
+	}
+}
+
+static void sgm41515_chip_state_init(struct sgm41515_chip *chip)
+{
+	if (!chip)
+		return;
+
+	atomic_set(&chip->charger_suspended, 0);
+	atomic_set(&chip->is_suspended, 0);
+	atomic_set(&chip->shutdown_mask, 0);
+	chip->charge_type = POWER_SUPPLY_TYPE_UNKNOWN;
+	chip->power_good = false;
+	chip->bc12_complete = false;
+	chip->bc12_retried = 0;
+	chip->bc12_delay_cnt = 0;
+}
+
+static void sgm41515_work_init(struct sgm41515_chip *chip)
+{
+	INIT_DELAYED_WORK(&chip->event_work, sgm41515_event_work);
+	INIT_DELAYED_WORK(&chip->bc12_timeout_work, sgm41515_bc12_timeout_work);
+	INIT_DELAYED_WORK(&chip->bc12_retry_work, sgm41515_bc12_retry_work);
+	INIT_DELAYED_WORK(&chip->bc12_plugin_work, sgm41515_bc12_plugin_work);
+	INIT_WORK(&chip->rerun_votable_work, sgm41515_rerun_votable_work);
+	INIT_DELAYED_WORK(&chip->vbus_check_work, sgm41515_vbus_check_work);
+#if (!IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP))
+	INIT_DELAYED_WORK(&chip->cc_sta_check_work, sgm41515_cc_sta_check_work);
+	chip->cc_detached_timeout_counter = 0;
+#endif
+}
+
+static void sgm41515_completion_init(struct sgm41515_chip *chip)
+{
+	init_completion(&chip->bc12_complete_comp);
+	reinit_completion(&chip->bc12_complete_comp);
+	init_completion(&chip->resume_done);
+}
+
+struct oplus_chg_ic_virq sgm41515_reverse_chg_virq_table[] = {
+	{.virq_id = OPLUS_IC_VIRQ_ERR },
+	{.virq_id = OPLUS_IC_VIRQ_ONLINE },
+	{.virq_id = OPLUS_IC_VIRQ_OFFLINE },
+};
+
+static int sgm41515_reverse_chg_init(struct oplus_chg_ic_dev *ic_dev)
+{
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	ic_dev->online = true;
+	oplus_chg_ic_virq_trigger(ic_dev, OPLUS_IC_VIRQ_ONLINE);
+	return 0;
+}
+
+static int sgm41515_reverse_chg_exit(struct oplus_chg_ic_dev *ic_dev)
+{
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	if (!ic_dev->online)
+		return 0;
+
+	ic_dev->online = false;
+	oplus_chg_ic_virq_trigger(ic_dev, OPLUS_IC_VIRQ_OFFLINE);
+	return 0;
+}
+
+static void *sgm41515_reverse_chg_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg_ic_func func_id)
+{
+	void *func = NULL;
+
+	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) && (func_id != OPLUS_IC_FUNC_EXIT)) {
+		chg_err("%s is offline\n", ic_dev->name);
+		return NULL;
+	}
+
+	switch (func_id) {
+	case OPLUS_IC_FUNC_INIT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_INIT, sgm41515_reverse_chg_init);
+		break;
+	case OPLUS_IC_FUNC_EXIT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_EXIT, sgm41515_reverse_chg_exit);
+		break;
+	case OPLUS_IC_FUNC_SET_NORMAL_REVERSE_HW_OCP:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_SET_NORMAL_REVERSE_HW_OCP, sgm41515_set_otg_boost_curr_limit);
+		break;
+	default:
+		chg_err("this func(=%d) is not supported\n", func_id);
+		func = NULL;
+		break;
+	}
+
+	return func;
+}
+
+static int oplus_pd_parse_child_node_ic_info(struct device_node *child,
+					      enum oplus_chg_ic_type *ic_type,
+					      int *ic_index)
+{
+	int ret;
+
+	ret = of_property_read_u32(child, "oplus,ic_type", ic_type);
+	if (ret >= 0) {
+		ret = of_property_read_u32(child, "oplus,ic_index", ic_index);
+		if (ret >= 0)
+			chg_info("node %s, ic_type = %d, ic_index = %d\n", child->name, *ic_type, *ic_index);
+		else
+			chg_err("can't get %s ic index, ret=%d\n", child->name, ret);
+	} else {
+		chg_err("can't get %s ic type, ret=%d\n", child->name, ret);
+	}
+	return ret;
+}
+
+static void sgm41515_register_child_ic(struct sgm41515_chip *chip,
+					     struct device_node *child)
+{
+	int ret;
+	enum oplus_chg_ic_type ic_type;
+	int ic_index;
+	struct oplus_chg_ic_dev *ic_dev;
+	struct oplus_chg_ic_cfg ic_cfg = { 0 };
+
+	ret = oplus_pd_parse_child_node_ic_info(child, &ic_type, &ic_index);
+	if(ret < 0)
+		return;
+
+	ic_cfg.name = child->name;
+	ic_cfg.index = ic_index;
+	ic_cfg.type = ic_type;
+	ic_cfg.of_node = child;
+
+	switch (ic_type) {
+	case OPLUS_CHG_IC_REVERSE:
+		snprintf(ic_cfg.manu_name, OPLUS_CHG_IC_MANU_NAME_MAX - 1, "reverse-sgm41515");
+		snprintf(ic_cfg.fw_id, OPLUS_CHG_IC_FW_ID_MAX - 1, "0x00");
+		ic_cfg.get_func = sgm41515_reverse_chg_get_func;
+		ic_cfg.virq_data = sgm41515_reverse_chg_virq_table;
+		ic_cfg.virq_num = ARRAY_SIZE(sgm41515_reverse_chg_virq_table);
+		break;
+	default:
+		chg_err("not support ic_type(=%d)\n", ic_type);
+		return;
+	}
+
+	ic_dev = devm_oplus_chg_ic_register(chip->dev, &ic_cfg);
+	if (!ic_dev) {
+		ret = -ENODEV;
+		chg_err("register %s error\n", child->name);
+		return;
+	}
+	chg_info("register %s success.\n", child->name);
+
+	switch (ic_type) {
+	case OPLUS_CHG_IC_REVERSE:
+		chip->reverse_chg_ic_dev = ic_dev;
+		oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_INIT);
+		break;
+	default:
+		chg_err("not support ic_type(=%d) ...\n", ic_type);
+		return;
+	}
+	of_platform_populate(child, NULL, NULL, chip->dev);
+}
+
+
+static void sgm41515_init_locks(struct sgm41515_chip *chip)
+{
+	mutex_init(&chip->i2c_lock);
+	mutex_init(&chip->dpdm_lock);
+	mutex_init(&chip->pinctrl_lock);
+}
+
+static void sgm41515_destroy_locks(struct sgm41515_chip *chip)
+{
+	mutex_destroy(&chip->pinctrl_lock);
+	mutex_destroy(&chip->dpdm_lock);
+	mutex_destroy(&chip->i2c_lock);
+}
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
 static int sgm41515_driver_probe(struct i2c_client *client)

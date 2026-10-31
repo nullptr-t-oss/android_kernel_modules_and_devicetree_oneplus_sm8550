@@ -193,12 +193,6 @@ enum IM_FLAG_TYPE {
 };
 
 #define MAX_IM_FLAG_PRIO	MAX_IM_FLAG_TYPE
-enum ots_state {
-	OTS_STATE_SET_AFFINITY,
-	OTS_STATE_DDL_ACTIVE,
-	OTS_STATE_DDL_ACTIVE_PREEMPTED,
-	OTS_STATE_MAX,
-};
 
 struct ux_sched_cluster {
 	struct cpumask cpus;
@@ -217,15 +211,16 @@ struct ux_sched_cputopo {
 };
 
 struct oplus_rq {
-	/* CONFIG_OPLUS_FEATURE_SCHED_ASSIST */
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
 	struct rb_root_cached ux_list;
 	/* a tree to track minimum exec vruntime */
 	struct rb_root_cached exec_timeline;
 	/* malloc this spinlock_t instead of built-in to shrank size of oplus_rq */
 	spinlock_t *ux_list_lock;
-	int nr_running;
 	u64 min_vruntime;
 	u64 load_weight;
+	int nr_running;
+#endif
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)
 	struct rb_root_cached ddl_root;
@@ -233,7 +228,7 @@ struct oplus_rq {
 	unsigned int nr_ddl_preempted;
 #endif
 
-#ifdef CONFIG_LOCKING_PROTECT
+#if IS_ENABLED(CONFIG_LOCKING_PROTECT)
 	struct list_head locking_thread_list;
 	spinlock_t *locking_list_lock;
 	int rq_locking_task;
@@ -243,7 +238,7 @@ struct oplus_rq {
 	/* for loadbalance */
 	struct oplus_lb lb;
 #endif
-};
+} ____cacheline_aligned;
 
 extern int global_debug_enabled;
 extern int global_lowend_plat_opt;
@@ -304,8 +299,6 @@ extern migrate_task_callback_t fbg_migrate_task_callback;
 typedef void (*android_rvh_schedule_handler_t)(struct task_struct *prev,
 	struct task_struct *next, struct rq *rq);
 extern android_rvh_schedule_handler_t fbg_android_rvh_schedule_callback;
-
-extern struct kmem_cache *oplus_task_struct_cachep;
 
 #define ots_to_ts(ots)	(ots->task)
 #define OTS_IDX			0
@@ -532,86 +525,6 @@ static inline void oplus_set_inherit_ux_start(struct task_struct *t, u64 start_t
 	ots->inherit_ux_start = t->se.sum_exec_runtime;
 }
 
-static inline void init_task_ux_info(struct task_struct *t)
-{
-	struct oplus_task_struct *ots = get_oplus_task_struct(t);
-
-	if (IS_ERR_OR_NULL(ots))
-		return;
-
-	RB_CLEAR_NODE(&ots->ux_entry);
-	RB_CLEAR_NODE(&ots->exec_time_node);
-	ots->ux_state = 0;
-	ots->sub_ux_state = 0;
-	atomic64_set(&ots->inherit_ux, 0);
-	ots->ux_depth = 0;
-	ots->enqueue_time = 0;
-	ots->inherit_ux_start = 0;
-	ots->ux_priority = -1;
-	ots->ux_nice = -1;
-	ots->vruntime = 0;
-	ots->preset_vruntime = 0;
-	ots->cfs_delta = -1;
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_ABNORMAL_FLAG)
-	ots->abnormal_flag = 0;
-#endif
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
-	ots->lb_state = 0;
-	ots->ld_flag = 0;
-#endif
-	cpumask_clear(&ots->cpus_requested);
-	ots->exec_calc_runtime = 0;
-	ots->is_update_runtime = 0;
-	ots->target_process = -1;
-	ots->wake_tid = 0;
-	ots->running_start_time = 0;
-	ots->update_running_start_time = false;
-	ots->last_wake_ts = 0;
-#if IS_ENABLED(CONFIG_OPLUS_LOCKING_STRATEGY)
-	memset(&ots->lkinfo, 0, sizeof(struct locking_info));
-#endif
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-	ots->block_start_time = 0;
-#endif
-#ifdef CONFIG_LOCKING_PROTECT
-	INIT_LIST_HEAD(&ots->locking_entry);
-	ots->locking_start_time = 0;
-	ots->locking_depth = 0;
-#endif
-
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
-	/* for loadbalance */
-	ots->snap_pcount = 0;
-	ots->snap_run_delay = 0;
-	plist_node_init(&ots->rtb, MAX_IM_FLAG_PRIO);
-#endif
-
-#if IS_ENABLED(CONFIG_ARM64_AMU_EXTN) && IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
-	ots->amu_cycle = 0;
-	ots->amu_instruct = 0;
-#endif
-
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_PIPELINE)
-	atomic_set(&ots->pipeline_cpu, -1);
-#endif
-#ifdef CONFIG_OPLUS_CAMERA_UX
-	if (CAMERA_UID == task_uid(t).val) {
-		if (!strncmp(t->comm, CAMERA_PROVIDER_NAME, 15)) {
-			ots->ux_state = SA_TYPE_HEAVY;
-		}
-	}
-#endif
-#ifdef CONFIG_OPLUS_CAMERA_UX
-	if (!strncmp(t->comm, "C2OMXNode", 15) || !strncmp(t->comm, "MP4WtrAudTrkThr", 15) || !strncmp(t->comm, "MP4WtrVidTrkThr", 15)) {
-			ots->ux_state = SA_TYPE_ANIMATOR;
-	}
-#endif
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_QOS_SCHED)
-	ots->qos_level = -1;
-	ots->qos_recover_prio = -2;
-#endif
-};
-
 static inline bool test_ux_type(struct task_struct *task, int ux_type)
 {
 	return oplus_get_ux_state(task) & ux_type;
@@ -715,7 +628,6 @@ void android_rvh_select_task_rq_rt_handler(void *unused, struct task_struct *p, 
 void android_rvh_find_lowest_rq_handler(void *unused, struct task_struct *p, struct cpumask *local_cpu_mask, int ret, int *best_cpu);
 
 /* register vender hook in kernel/sched/core.c */
-void android_rvh_sched_fork_handler(void *unused, struct task_struct *p);
 void android_rvh_enqueue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags);
 void android_rvh_dequeue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags);
 void android_rvh_schedule_handler(void *unused, struct task_struct *prev, struct task_struct *next, struct rq *rq);

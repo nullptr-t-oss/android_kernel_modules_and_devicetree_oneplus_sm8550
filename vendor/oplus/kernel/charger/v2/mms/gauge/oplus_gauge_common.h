@@ -5,6 +5,8 @@
 #include "oplus_sili.h"
 #include <oplus_sec.h>
 
+#define WORKAROUND_MASK_VTERM_INVALID_USE_MAX	(1U << 0)
+
 #define GAUGE_IC_NUM_MAX 2
 #define CALIB_TIME_STR_LEN 32
 
@@ -137,6 +139,7 @@ struct oplus_mms_gauge {
 	struct oplus_chg_strategy **ddrc_strategy;
 	struct ddrc_temp_curves ddrc_curve;
 	struct ddrc_temp_curves ddrc_curve_sub;
+	u32 workaround_mask;
 	int ddrc_num;
 
 	struct oplus_sec *sec_chip;

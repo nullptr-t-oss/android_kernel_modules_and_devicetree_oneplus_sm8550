@@ -2938,7 +2938,7 @@ static u32 syna_trigger_reason(void *chip_data, int gesture_enable, int is_suspe
 
 	if (tcm_hcd->zeroflash_init_done == 0) {
 		TPD_INFO("hdl not ready, disable irq\n");
-		disable_irq_nosync(tcm_hcd->s_client->irq);
+/*		disable_irq_nosync(tcm_hcd->s_client->irq);			*/
 		return retval;
 	}
 
@@ -3383,20 +3383,23 @@ static int synaptics_enable_game_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 
 static int synaptics_enable_waterproof_mode(struct syna_tcm_hcd *tcm_hcd, bool enable)
 {
-	int8_t ret = -1;
+	int ret = -1;
 
 	TPD_DEBUG("%s:enable = %d\n", __func__, enable);
 
-	if (enable) {
-		ret = syna_tcm_set_dynamic_config(tcm_hcd, DC_WATERPROOF_ENABLE, 0);
+	if (tcm_hcd->waterproof_negative_valid_support) {
+		TPD_DEBUG("%s: waterproof negative valid supported\n", __func__);
+		ret = syna_tcm_set_dynamic_config(tcm_hcd, DC_WATERPROOF_ENABLE, enable ? 0 : 1);
 		if (ret < 0) {
-			TPD_INFO("%s:failed to enable waterproof mode\n", __func__);
+			TPD_INFO("%s: failed to %s waterproof mode\n",
+				 __func__, enable ? "enable" : "disable");
 			return ret;
 		}
 	} else {
-		ret = syna_tcm_set_dynamic_config(tcm_hcd, DC_WATERPROOF_ENABLE, 1);
+		ret = syna_tcm_set_dynamic_config(tcm_hcd, DC_WATERPROOF_ENABLE, enable ? 1 : 0);
 		if (ret < 0) {
-			TPD_INFO("%s:failed to disable waterproof mode\n", __func__);
+			TPD_INFO("%s: failed to %s waterproof mode\n",
+				 __func__, enable ? "enable" : "disable");
 			return ret;
 		}
 	}
@@ -3489,9 +3492,11 @@ static int syna_mode_switch(void *chip_data, work_mode mode, int flag)
 		break;
 
 	case MODE_WATERPROOF:
-		ret = synaptics_enable_waterproof_mode(tcm_hcd, flag);
-		if (ret < 0) {
-			TPD_INFO("%s: enable waterproof mode : %d failed\n", __func__, flag);
+		if (ts != NULL && ts->is_suspended == 0) {
+			ret = synaptics_enable_waterproof_mode(tcm_hcd, flag);
+			if (ret < 0) {
+				TPD_INFO("%s: enable waterproof mode : %d failed\n", __func__, flag);
+			}
 		}
 		break;
 
@@ -5382,13 +5387,20 @@ exit:
 static void syna_aiunit_game_info(void *chip_data)
 {
 	struct syna_tcm_hcd *tcm_hcd = (struct syna_tcm_hcd *)chip_data;
-	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
+	struct touchpanel_data *ts = NULL;
 	u8 cmd[MAX_AIUNIT_SET_NUM * 10 + 1] = { 0 };
 	int i = 0;
 	int ret = 0;
 	unsigned short regval = 0;
 
-	if (tcm_hcd == NULL) {
+	if (tcm_hcd == NULL || tcm_hcd->s_client == NULL) {
+		TPD_INFO("%s: tcm_hcd == NULL.\n", __func__);
+		return;
+	}
+
+	ts = spi_get_drvdata(tcm_hcd->s_client);
+	if (!ts) {
+		TPD_INFO("%s: ts is NULL.\n", __func__);
 		return;
 	}
 
@@ -5693,6 +5705,7 @@ static void syna_tcm_parse_dts(struct syna_tcm_hcd *tcm_hcd, struct spi_device *
 
 	tcm_hcd->irq_trigger_hdl_support = of_property_read_bool(np, "synaptics,irq_trigger_hdl_support");
 	tcm_hcd->pt17_pt18_test_support = of_property_read_bool(np, "pt17_pt18_test_support");
+	tcm_hcd->waterproof_negative_valid_support = of_property_read_bool(np, "waterproof_negative_valid_support");
 }
 
 static int syna_tcm_spi_probe(struct spi_device *spi)
@@ -5718,6 +5731,7 @@ static int syna_tcm_spi_probe(struct spi_device *spi)
 	}
 
 	g_tcm_hcd = tcm_hcd;
+	tcm_hcd->ts = ts;
 	tcm_hcd->s_client = spi;
 	tcm_hcd->hw_res = &ts->hw_res;
 	tcm_hcd->rd_chunk_size = RD_CHUNK_SIZE;

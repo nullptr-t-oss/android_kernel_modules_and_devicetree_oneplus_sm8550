@@ -214,7 +214,7 @@ static unsigned int cts_trigger_reason(void *chip_data, int gesture_enable,
     }
 
    // gesture_info = &cts_dev->rtdata.gesture_info;
-    memmove(gesture_info, touch_info, sizeof(struct cts_device_gesture_info));
+    memmove(gesture_info, touch_info, sizeof(struct cts_device_touch_info));
     //TPD_INFO("palm_gesture_id = 0x%x\n", gesture_info->gesture_id);
     if (((gesture_info->gesture_id & 0xFF) == 0x30) && !(is_suspended == 1)) {
         TPD_INFO("palm_gesture_id = 0x%x\n", gesture_info->gesture_id);
@@ -298,7 +298,7 @@ static int cts_get_gesture_info(void *chip_data,
     struct cts_device_gesture_info *gesture_info = &cts_dev->rtdata.gesture_info;
     uint32_t gesture_type = 0;
 
-    memmove(gesture_info, touch_info, sizeof(struct cts_device_gesture_info));
+    memmove(gesture_info, touch_info, sizeof(struct cts_device_touch_info));
 
     TPD_INFO("<I> Process gesture, id=0x%02x, num_points=%d\n",
             gesture_info->gesture_id, gesture_info->num_points);
@@ -776,15 +776,22 @@ static void cts_force_water_mode(void *chip_data, bool enable)
 static void cts_read_water_flag(void *chip_data)
 {
     struct chipone_ts_data *cts_data = (struct chipone_ts_data *)chip_data;
-    struct cts_device *cts_dev = &cts_data->cts_dev;
-    struct cts_interface *cts_if = cts_dev->cts_if;
-    struct touchpanel_data *ts =spi_get_drvdata(cts_data->spi_client);
+    struct cts_device *cts_dev = NULL;
+    struct cts_interface *cts_if = NULL;
+    struct touchpanel_data *ts = NULL;
     int ret = -1;
     //uint8_t cmd = 1;
     u8 buf[1];
 
     if (cts_data == NULL) {
         TPD_INFO("<E> water cts_data = NULL!\n");
+        return;
+    }
+    cts_dev = &cts_data->cts_dev;
+    cts_if = cts_dev->cts_if;
+    ts = spi_get_drvdata(cts_data->spi_client);
+    if (cts_if == NULL || ts == NULL) {
+        TPD_INFO("<E> cts_if or ts is NULL!\n");
         return;
     }
     cts_lock_device(cts_dev);

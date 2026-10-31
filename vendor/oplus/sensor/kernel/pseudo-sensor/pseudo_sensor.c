@@ -825,7 +825,6 @@ static int fault_inject_append(int32_t fault_code, int32_t frequency, int32_t re
 	if (NULL == smem) {
 		return -ENOMEM;
 	}
-
 	smem->inject_data[0] = fault_code;
 	smem->inject_data[1] = frequency;
 	smem->inject_data[2] = repeat;

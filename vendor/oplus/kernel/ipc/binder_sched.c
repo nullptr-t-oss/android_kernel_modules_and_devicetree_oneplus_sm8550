@@ -190,16 +190,17 @@ static inline bool get_task_async_ux_sts(struct oplus_task_struct *ots)
 	if (IS_ERR_OR_NULL(ots)) {
 		return false;
 	} else {
-		return ots->binder_async_ux_sts;
+		return test_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags);
 	}
 }
 
 static inline void set_task_async_ux_sts(struct oplus_task_struct *ots, bool sts)
 {
-	if (IS_ERR_OR_NULL(ots)) {
-		return;
-	} else {
-		ots->binder_async_ux_sts = sts;
+	if (!IS_ERR_OR_NULL(ots)) {
+		if (sts)
+			set_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags);
+		else
+			clear_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags);
 	}
 }
 
@@ -240,7 +241,7 @@ void set_task_async_ux_enable(pid_t pid, int enable)
 		LOG_BINDER_SYSTRACE_LVL1, NULL, NULL);
 	trace_binder_set_get_ux(task, pid, enable, "set enable end");
 	oplus_binder_debug(LOG_SET_ASYNC_UX, "(set_pid=%d task_pid=%d comm=%s) enable=%d ux_sts=%d set enable end\n",
-		pid, task->pid, task->comm, ots->binder_async_ux_enable, ots->binder_async_ux_sts);
+		pid, task->pid, task->comm, ots->binder_async_ux_enable, test_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags));
 }
 
 bool get_task_async_ux_enable(pid_t pid)
@@ -647,14 +648,14 @@ static inline void async_binder_set_inherit_ux(struct task_struct *thread_task,
 	}
 
 	trace_binder_inherit_ux(from_task, thread_task, ots->ux_depth, ots->ux_state,
-		type, ots->binder_async_ux_sts, sync, "async_set before set");
+		type, test_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags), sync, "async_set before set");
 
 	set_task_async_ux_sts(ots, true);
 	ux_value = (ots->ux_state | ux_value);
 	set_inherit_ux(thread_task, INHERIT_UX_BINDER, ots->ux_depth, ux_value);
 
 	trace_binder_inherit_ux(from_task, thread_task, ots->ux_depth, ots->ux_state,
-		type, ots->binder_async_ux_sts, sync, "async_set after set");
+		type, test_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags), sync, "async_set after set");
 
 	oplus_binder_debug(LOG_SET_ASYNC_UX, "async_set_ux after set, thread(pid = %d tgid = %d comm = %s group = %s) sf = %d ux_value = 0x%x ux_state = 0x%x %d \
 		depth = %d inherit_ux = %lld\n",
@@ -694,7 +695,7 @@ static inline void binder_unset_inherit_ux(struct task_struct *thread_task,
 	if (test_inherit_ux(thread_task, INHERIT_UX_BINDER)) {
 		if (!IS_ERR_OR_NULL(ots)) {
 			trace_binder_inherit_ux(NULL, thread_task, ots->ux_depth, ots->ux_state,
-				INVALID_VALUE, ots->binder_async_ux_sts,
+				INVALID_VALUE, test_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags),
 				unset_type, "unset_ux before unset");
 		}
 
@@ -712,12 +713,12 @@ static inline void binder_unset_inherit_ux(struct task_struct *thread_task,
 				set_task_async_ux_sts(ots, false);
 			}
 			trace_binder_inherit_ux(NULL, thread_task, ots->ux_depth, ots->ux_state,
-				INVALID_VALUE, ots->binder_async_ux_sts, unset_type, "unset_ux after unset");
+				INVALID_VALUE, test_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags), unset_type, "unset_ux after unset");
 			if (unset_type == SYNC_OR_ASYNC_UNSET) {
 				oplus_binder_debug(LOG_SET_ASYNC_UX, "sync || async_unset_ux after unset, thread(pid = %d tgid = %d comm = %s) \
 					 ots_enable = %d ux_sts = %d ux_state = %d ux_depth = %d inherit_ux = %lld\n",
 					thread_task->pid, thread_task->tgid, thread_task->comm, ots->binder_async_ux_enable,
-					ots->binder_async_ux_sts, ots->ux_state, ots->ux_depth, atomic64_read(&ots->inherit_ux));
+					test_bit(BINDER_ASYNC_UX_STS_BIT, &ots->common_flags), ots->ux_state, ots->ux_depth, atomic64_read(&ots->inherit_ux));
 			} else {
 				oplus_binder_debug(LOG_SET_SYNC_UX, "sync_unset_ux after unset, thread(pid = %d tgid = %d comm = %s) \
 					 ux_state = %d ux_depth = %d inherit_ux = %lld\n",
