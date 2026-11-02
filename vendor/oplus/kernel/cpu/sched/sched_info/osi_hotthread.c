@@ -29,7 +29,7 @@ DEFINE_PER_CPU(struct rq_num, percpu_rq_num);
 struct kmem_cache *hot_thread_struct_cachep;
 
 extern unsigned long high_load_switch;
-extern g_over_load;
+extern int g_over_load;
 
 static struct task_track_cpu task_track[MAX_CLUSTER];
 struct hot_thread_struct  hot_thread_top[JANK_WIN_CNT][TOP_THREAD_CNT];
