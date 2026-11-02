@@ -9673,7 +9673,7 @@ static int qseecom_reboot_worker(struct notifier_block *nb, unsigned long val, v
 
 	return rc;
 }
-static int qseecom_register_reboot_notifier()
+static int qseecom_register_reboot_notifier(void)
 {
 	int rc = 0;
 

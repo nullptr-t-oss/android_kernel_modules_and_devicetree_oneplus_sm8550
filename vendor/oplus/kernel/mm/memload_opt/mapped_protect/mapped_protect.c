@@ -312,7 +312,7 @@ static void del_page_from_lrulist(void *data, struct page *page, bool compound, 
 }
 
 #ifdef CONFIG_OPLUS_FG_PROTECT
-static void do_traversal_fg_memcg()
+static void do_traversal_fg_memcg(void)
 {
 	struct page *page;
 	struct lruvec* lruvec;

@@ -132,7 +132,7 @@ const char *ipa_hw_type_name[] = {
 	"MAX"
 };
 
-void BuildRegressionTestSuite()
+void BuildRegressionTestSuite(void)
 {
 	TestBase *test;
 
@@ -146,7 +146,7 @@ void BuildRegressionTestSuite()
 
 
 ///////////////////////////////////////////////////////////
-void showTests()
+void showTests(void)
 {
 	TestBase *test = testmanager->m_testList[0];
 
@@ -171,7 +171,7 @@ void showTests()
 	// 15) DmaModeMBIMggregationLoopTest (part of DmaMbim16Agg suite), (1.0 <= HW Version <= 2.1)
 }
 
-void showSuits()
+void showSuits(void)
 {
 	TestBase *test;
 	std::set<string> suiteSet;
@@ -227,7 +227,7 @@ const char* getSuite(int suite_num) {
 	return NULL;
 }
 
-int chooserMode() {
+int chooserMode(void) {
 	vector<string> testSuiteList;
 	vector<string> testNameList;
 	unsigned int test_num;

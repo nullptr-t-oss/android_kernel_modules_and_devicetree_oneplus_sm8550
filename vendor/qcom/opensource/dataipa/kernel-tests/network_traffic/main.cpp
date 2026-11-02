@@ -116,7 +116,7 @@ void demo(UlsoPacket<>& ulsoPacket, const string& name) {
         cout << sep << endl;});
 }
 
-void testIpv4Tcp(){
+void testIpv4Tcp(void){
     using L2Type = IPv4Header;
     using L3Type = TcpHeader;
     using PacketType = UlsoPacket<L3Type, L2Type>;
@@ -138,7 +138,7 @@ void testIpv4Tcp(){
     }
 }
 
-void testIpv4Udp(){
+void testIpv4Udp(void){
     using L2Type = IPv4Header;
     using L3Type = UdpHeader;
     using PacketType = UlsoPacket<L3Type, L2Type>;
@@ -189,7 +189,7 @@ bool testPacketConstruction(struct Packet packet, size_t segmentSize=20){
     return true;
 }
 
-int main() {
+int main(void) {
 
     uint8_t arr[UlsoPacket<>::maxSize] = {0};
     UlsoPacket<UdpHeader, IPv4Header> p(19, 100, false);

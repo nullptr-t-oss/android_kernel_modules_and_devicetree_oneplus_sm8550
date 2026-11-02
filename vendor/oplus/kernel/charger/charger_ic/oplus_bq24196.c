@@ -585,7 +585,7 @@ static int bq24196_set_chging_term_disable(void)
 	return rc;
 }
 
-int bq24196_kick_wdt()
+int bq24196_kick_wdt(void)
 {
 	int rc = 0;
 	struct chip_bq24196 *chip = charger_ic;
@@ -630,7 +630,7 @@ int bq24196_enable_charging(void)
 	return rc;
 }
 
-int bq24196_disable_charging()
+int bq24196_disable_charging(void)
 {
 	int rc = 0;
 	struct chip_bq24196 *chip = charger_ic;
@@ -669,7 +669,7 @@ int bq24196_enable_charging(void)
 	return rc;
 }
 
-int bq24196_disable_charging()
+int bq24196_disable_charging(void)
 {
 	int rc = 0;
 	struct chip_bq24196 *chip = charger_ic;
@@ -878,7 +878,7 @@ int bq24196_unsuspend_charger(void)
 }
 
 #ifdef CONFIG_MTK_PMIC_CHIP_MT6353
-int bq24196_reset_charger()
+int bq24196_reset_charger(void)
 {
 	int rc = 0;
 	struct chip_bq24196 *chip = charger_ic;
@@ -923,7 +923,7 @@ int bq24196_reset_charger()
 	return rc;
 }
 #else
-int bq24196_reset_charger()
+int bq24196_reset_charger(void)
 {
 	int rc = 0;
 	struct chip_bq24196 *chip = charger_ic;
@@ -986,7 +986,7 @@ void bq24196_dump_registers(void)
 
 }
 #else
-void bq24196_dump_registers()
+void bq24196_dump_registers(void)
 {
 	int rc = 0;
 	int addr = 0;

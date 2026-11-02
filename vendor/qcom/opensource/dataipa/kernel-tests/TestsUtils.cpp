@@ -868,7 +868,7 @@ void ConfigureScenario(int testConfiguration, const char* params)
 	close(fd);
 }//func
 
-void clean_old_stashed_config()
+void clean_old_stashed_config(void)
 {
 	if (current_configuration == NULL)
 		return;
@@ -931,7 +931,7 @@ void stash_new_configuration(struct ipa_test_config_header *header)
 		}
 }
 
-bool is_prev_configuration_generic()
+bool is_prev_configuration_generic(void)
 {
 	int fd;
 	char str[10] = {0};

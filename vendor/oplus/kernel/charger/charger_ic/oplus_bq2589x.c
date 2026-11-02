@@ -2616,7 +2616,7 @@ aicl_end:
 	return rc;
 }
 
-void oplus_bq2589x_safe_calling_status_check()
+void oplus_bq2589x_safe_calling_status_check(void)
 {
 	if(g_oplus_chip == NULL) {
 		return;
@@ -2638,7 +2638,7 @@ void oplus_bq2589x_safe_calling_status_check()
 	}
 }
 
-void oplus_bq2589x_safe_camera_status_check()
+void oplus_bq2589x_safe_camera_status_check(void)
 {
 	if(g_oplus_chip == NULL) {
 		return;

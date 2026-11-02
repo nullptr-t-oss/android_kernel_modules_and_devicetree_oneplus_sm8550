@@ -77,7 +77,7 @@ static int ambiente_prox_data_report(struct data_unit_t *input_event)
 	return virtual_sensor_data_report(&event);
 }
 
-static int	ambiente_prox_flush_report()
+static int	ambiente_prox_flush_report(void)
 {
 	return virtual_sensor_flush_report(ID_AMBIENTE_PROX);
 }

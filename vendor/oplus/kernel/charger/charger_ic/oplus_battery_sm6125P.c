@@ -12465,7 +12465,7 @@ static int smbchg_set_rechg_vol(int rechg_vol)
         return 0;
 }
 
-static int smbchg_reset_charger()
+static int smbchg_reset_charger(void)
 {
         return 0;
 }
@@ -12503,12 +12503,12 @@ static int smbchg_otg_disable(void)
         return 0;
 }
 
-static int oplus_set_chging_term_disable()
+static int oplus_set_chging_term_disable(void)
 {
         return 0;
 }
 
-static bool qcom_check_charger_resume()
+static bool qcom_check_charger_resume(void)
 {
         return true;
 }
@@ -12753,7 +12753,7 @@ static bool oplus_chg_get_shortc_hw_gpio_status(void)
 }
 #endif
 
-static bool smbchg_need_to_check_ibatt()
+static bool smbchg_need_to_check_ibatt(void)
 {
         return false;
 }
@@ -13004,7 +13004,7 @@ static int smbchg_dp_dm(int val)
         return 0;
 }
 
-static int smbchg_calc_max_flash_current()
+static int smbchg_calc_max_flash_current(void)
 {
         return 0;
 }

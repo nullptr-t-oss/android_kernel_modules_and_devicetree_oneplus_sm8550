@@ -225,7 +225,7 @@ bail:
 /*
  * Function for taking/locking the mutex...
  */
-static int take_mutex()
+static int take_mutex(void)
 {
 	int ret;
 
@@ -256,7 +256,7 @@ again:
 /*
  * Function for giving/unlocking the mutex...
  */
-static int give_mutex()
+static int give_mutex(void)
 {
 	int ret = (nat_mutex_init) ? pthread_mutex_unlock(&nat_mutex) : -1;
 

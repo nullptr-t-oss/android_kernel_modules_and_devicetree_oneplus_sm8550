@@ -5824,7 +5824,7 @@ static int oplus_chg_usbtemp_parse_dt(struct oplus_chg_chip *chip)
 	return rc;
 }
 
-static bool oplus_mtk_hv_flashled_check_is_gpio()
+static bool oplus_mtk_hv_flashled_check_is_gpio(void)
 {
 	if (gpio_is_valid(mtkhv_flashled_pinctrl.chgvin_gpio) && gpio_is_valid(mtkhv_flashled_pinctrl.pmic_chgfunc_gpio)) {
 		return true;
@@ -7080,7 +7080,7 @@ EXPORT_SYMBOL(oplus_chg_set_camera_on);
 
 
 //====================================================================//
-void oplus_set_typec_sinkonly()
+void oplus_set_typec_sinkonly(void)
 {
 	if (pinfo != NULL && pinfo->tcpc != NULL) {
 		tcpm_typec_disable_function(pinfo->tcpc, false);
@@ -7090,7 +7090,7 @@ void oplus_set_typec_sinkonly()
 };
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
-void oplus_set_typec_cc_open()
+void oplus_set_typec_cc_open(void)
 {
 	if (pinfo == NULL || pinfo->tcpc == NULL)
 		return;

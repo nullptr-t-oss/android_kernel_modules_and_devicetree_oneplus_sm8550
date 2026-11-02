@@ -194,7 +194,7 @@ exit:
 }
 
 
-static void __exit oplus_security_keventupload_exit()
+static void __exit oplus_security_keventupload_exit(void)
 {
 	if (oplus_security_keventupload_flag){
 		genl_unregister_family(&oplus_security_family);

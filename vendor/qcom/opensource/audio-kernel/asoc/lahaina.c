@@ -120,7 +120,7 @@ static const unsigned int audio_core_list[] = {1, 2};
 static cpumask_t audio_cpu_map = CPU_MASK_NONE;
 static struct dev_pm_qos_request *msm_audio_req = NULL;
 
-static void msm_audio_add_qos_request()
+static void msm_audio_add_qos_request(void)
 {
 	int i;
 	int cpu = 0;
@@ -148,7 +148,7 @@ static void msm_audio_add_qos_request()
 	}
 }
 
-static void msm_audio_remove_qos_request()
+static void msm_audio_remove_qos_request(void)
 {
 	int cpu = 0;
 

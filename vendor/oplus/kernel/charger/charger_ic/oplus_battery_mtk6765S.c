@@ -4944,7 +4944,7 @@ static void init_proc_upmu_vs1_config(void)
 	}
 }
 
-static int oplus_pmic_chip_init()
+static int oplus_pmic_chip_init(void)
 {
 	static struct mtk_charger *pinfo;
 	int ret = 0;

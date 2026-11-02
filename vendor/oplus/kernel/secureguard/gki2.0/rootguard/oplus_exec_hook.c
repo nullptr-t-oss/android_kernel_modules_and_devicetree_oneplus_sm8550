@@ -105,7 +105,7 @@ static void oplus_report_execveat(const char *path, const char* dcs_event_id)
 	printk(KERN_ERR "[ROOTCHECK-EXEC-INFO]:common %s result %s\n", path, dcs_event_id);
 }
 
-static int oplus_check_execveat_perm( )
+static int oplus_check_execveat_perm(void)
 {
 	char *absolute_path_buf = NULL;
 	char *absolute_path = NULL;
@@ -155,7 +155,7 @@ out_ret:
 	return need_block;
 }
 
-static int oplus_exec_block( )
+static int oplus_exec_block(void)
 {
 	int  retval = 0;
 

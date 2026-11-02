@@ -87,7 +87,7 @@ static inline struct worker* get_worker(struct task_struct *p)
 	return worker;
 }
 
-static void print_heavy_loads_tasks()
+static void print_heavy_loads_tasks(void)
 {
 	int i = 0;
 	for (; i < NUM_PRINT_HEAVY_LOAD_TASK; i++) {
@@ -109,7 +109,7 @@ static int cpustats_saved_comp(const void *a, const void *b)
 	const struct task_stat sb = *(const struct task_stat *)b;
 	return sb.pwr - sa.pwr;
 }
-static void parse_task_stats()
+static void parse_task_stats(void)
 {
 	int i = 0, num = 0;
 
@@ -134,7 +134,7 @@ static void parse_task_stats()
 	sort(cpustats_saved, num, sizeof(struct task_stat), cpustats_saved_comp, NULL);
 }
 
-static void task_power_stats()
+static void task_power_stats(void)
 {
 	int i, j;
 	unsigned long begin = jiffies - CTP_WINDOW_SZ * HZ, end = jiffies;
@@ -182,7 +182,7 @@ static inline unsigned long cfs_util(int cpu)
 	return min_t(unsigned long, util, capacity_orig_of(cpu));
 }
 
-static void print_active_wakeup_sources()
+static void print_active_wakeup_sources(void)
 {
 	memset(ws_msg, 0, sizeof(ws_msg));
 	pm_get_active_wakeup_sources(ws_msg, MAX_ACTIVE_WAKEUP_SOUCE_LEN);
@@ -337,7 +337,7 @@ static void account_task_time_cp(void *data, struct task_struct *p, struct rq *r
 	kstat->idx = idx + 1;
 }
 
-static int register_vendor_hooks()
+static int register_vendor_hooks(void)
 {
 	int rc = 0;
 #if 0

@@ -78,7 +78,7 @@ void Ecc_Rng128( uint32_t * gf2n_RandomValue )
 
    date:      .
  ************************************************************************* */
-BOOL Ecc_DoAuthentication( )
+BOOL Ecc_DoAuthentication(void)
 {
 	dwordvec_t gf2nRandomValue = {0,0,0,0,0,0};
 	dwordvec_t gf2nChallenge = {0,0,0,0,0,0};

@@ -219,7 +219,7 @@ void stop_dhcp(struct sigma_dut *dut, const char *group_ifname, int go)
 static int stop_event_rx = 0;
 
 #ifdef __linux__
-void stop_event_thread()
+void stop_event_thread(void)
 {
 	stop_event_rx = 1;
 	printf("sigma_dut dhcp terminating\n");
