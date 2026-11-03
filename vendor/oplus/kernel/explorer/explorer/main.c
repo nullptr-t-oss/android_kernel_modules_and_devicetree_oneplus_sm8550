@@ -748,7 +748,7 @@ pbl_out:
 			ret = copy_from_user(data, (char __user *)arg, param_size);
 			if (ret) {
 				pr_err("%s, can not copy explorer_nmod_info from user, ret = 0x%x.\n", __func__, ret);
-				goto td_out;
+				goto ln_out;
 			}
 
 			epd->nmod_info = (struct explorer_npu_mod_info *)data;
