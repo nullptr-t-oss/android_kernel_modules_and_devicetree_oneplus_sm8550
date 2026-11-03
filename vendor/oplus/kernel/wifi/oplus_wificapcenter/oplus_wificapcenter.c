@@ -82,7 +82,7 @@ enum {
 
 static DEFINE_MUTEX(oplus_wcc_sync_nl_mutex);
 static DEFINE_MUTEX(oplus_wcc_async_nl_mutex);
-static struct ctl_table_header *oplus_table_hrd;
+static struct ctl_table_header *oplus_table_hrd __maybe_unused;
 static rwlock_t oplus_sync_nl_lock;
 static rwlock_t oplus_async_nl_lock;
 static u32 oplus_wcc_debug = 1;
