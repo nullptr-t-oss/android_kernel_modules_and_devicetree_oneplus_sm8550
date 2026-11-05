@@ -173,10 +173,12 @@ void __cam_dma_fence_signal_cb(
 }
 
 int cam_dma_fence_get_put_ref(
-	bool get_or_put, int32_t dma_fence_row_idx)
+	bool get_or_put, int32_t dma_fence_row_idx, struct dma_fence *expected_fence)
 {
 	struct dma_fence *dma_fence;
 	struct cam_dma_fence_row *row;
+	uint64_t seqno = 0;
+	uint32_t refcnt = 0;
 
 	if ((dma_fence_row_idx < 0) ||
 		(dma_fence_row_idx >= CAM_DMA_FENCE_MAX_FENCES)) {
@@ -198,6 +200,17 @@ int cam_dma_fence_get_put_ref(
 
 	dma_fence = row->fence;
 
+	if (expected_fence && (dma_fence != expected_fence)) {
+		CAM_ERR(CAM_DMA_FENCE,
+			"dma fence mismatch at idx: %d exp: %pK actual: %pK row recycled",
+			dma_fence_row_idx, expected_fence, dma_fence);
+		spin_unlock_bh(&g_cam_dma_fence_dev->row_spinlocks[dma_fence_row_idx]);
+		dma_fence_put(expected_fence);
+		return -EINVAL;
+	}
+
+	seqno = dma_fence->seqno;
+	refcnt = kref_read(&dma_fence->refcount);
 	if (get_or_put)
 		dma_fence_get(dma_fence);
 	else
@@ -205,9 +218,9 @@ int cam_dma_fence_get_put_ref(
 
 	spin_unlock_bh(&g_cam_dma_fence_dev->row_spinlocks[dma_fence_row_idx]);
 
-	CAM_DBG(CAM_DMA_FENCE, "Refcnt: %u after %s for dma fence with seqno: %llu",
-		kref_read(&dma_fence->refcount), (get_or_put ? "getref" : "putref"),
-		dma_fence->seqno);
+	CAM_DBG(CAM_DMA_FENCE,
+		"Refcnt: %u before %s for dma fence with seqno: %llu",
+		refcnt, (get_or_put ? "getref" : "putref"), seqno);
 
 	return 0;
 }
