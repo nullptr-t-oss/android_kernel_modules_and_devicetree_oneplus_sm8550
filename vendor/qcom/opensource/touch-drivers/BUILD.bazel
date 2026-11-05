@@ -38,6 +38,14 @@ ddk_headers(
 )
 
 ddk_headers(
+    name = "focaltech_touch_ft3169_headers",
+    hdrs = glob([
+            "focaltech_touch_ft3169/*.h"
+        ]
+    )
+)
+
+ddk_headers(
     name = "synaptics_tcm_headers",
     hdrs = glob([
             "synaptics_tcm/*.h"
@@ -82,7 +90,7 @@ ddk_headers(
 
 ddk_headers(
     name = "touch_drivers_headers",
-    hdrs = [":goodix_ts_headers", ":nt36xxx_headers", ":qts_headers", ":focaltech_headers", ":synaptics_tcm_headers", ":glink_interface_ts_headers", ":pt_headers", ":raydium_headers", ":config_headers"]
+    hdrs = [":goodix_ts_headers", ":nt36xxx_headers", ":qts_headers", ":focaltech_headers", ":focaltech_touch_ft3169_headers", ":synaptics_tcm_headers", ":glink_interface_ts_headers", ":pt_headers", ":raydium_headers", ":config_headers"]
 )
 
 load(":target.bzl", "define_touch_target")

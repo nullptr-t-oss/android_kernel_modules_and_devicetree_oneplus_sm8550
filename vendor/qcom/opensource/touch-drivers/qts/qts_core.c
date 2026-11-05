@@ -196,18 +196,10 @@ static int qts_populate_vm_info(struct qts_data *qts_data)
 	return 0;
 }
 
-static void qts_destroy_vm_info(struct qts_data *qts_data)
-{
-	kfree(qts_data->vm_info->iomem_sizes);
-	kfree(qts_data->vm_info->iomem_bases);
-	kfree(qts_data->vm_info);
-}
-
 static void qts_vm_deinit(struct qts_data *qts_data)
 {
 	if (qts_data->vm_info->mem_cookie)
 		gh_mem_notifier_unregister(qts_data->vm_info->mem_cookie);
-	qts_destroy_vm_info(qts_data);
 }
 
 static int qts_trusted_touch_get_vm_state(struct qts_data *qts_data)

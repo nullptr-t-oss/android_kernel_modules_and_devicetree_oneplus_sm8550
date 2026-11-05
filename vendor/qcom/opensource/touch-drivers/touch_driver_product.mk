@@ -36,17 +36,25 @@ ifeq ($(TOUCH_DLKM_ENABLE),  true)
         else ifeq ($(TARGET_BOARD_PLATFORM), bengal)
                 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/synaptics_tcm_ts.ko \
                         $(KERNEL_MODULES_OUT)/nt36xxx-i2c.ko \
-			$(KERNEL_MODULES_OUT)/focaltech_fts.ko
+			$(KERNEL_MODULES_OUT)/focaltech_fts.ko \
+                        $(KERNEL_MODULES_OUT)/qts.ko
         else ifeq ($(TARGET_BOARD_PLATFORM), trinket)
                 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/synaptics_tcm_ts.ko
         else ifeq ($(TARGET_BOARD_PLATFORM), pitti)
                 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/focaltech_fts.ko \
+                        $(KERNEL_MODULES_OUT)/focaltech_tp.ko \
                         $(KERNEL_MODULES_OUT)/goodix_ts.ko \
                         $(KERNEL_MODULES_OUT)/qts.ko
         else ifeq ($(TARGET_BOARD_PLATFORM), volcano)
                 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/goodix_ts.ko \
                         $(KERNEL_MODULES_OUT)/focaltech_fts.ko \
 		        $(KERNEL_MODULES_OUT)/qts.ko
+        else ifeq ($(TARGET_BOARD_PLATFORM), khaje)
+                PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/focaltech_fts.ko \
+                        $(KERNEL_MODULES_OUT)/qts.ko
+        else ifeq ($(TARGET_BOARD_PLATFORM), scuba)
+                PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/focaltech_fts.ko \
+                        $(KERNEL_MODULES_OUT)/qts.ko
         else
                 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/nt36xxx-i2c.ko \
                         $(KERNEL_MODULES_OUT)/goodix_ts.ko \

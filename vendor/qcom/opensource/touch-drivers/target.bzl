@@ -59,6 +59,7 @@ def define_pitti(t,v):
         registry = touch_driver_modules,
         modules = [
             "focaltech_fts",
+            "focaltech_tp",
             "goodix_ts",
             "qts"
         ],
@@ -67,6 +68,7 @@ def define_pitti(t,v):
             "CONFIG_ARCH_PITTI",
             "CONFIG_MSM_TOUCH",
             "CONFIG_TOUCH_FOCALTECH",
+            "CONFIG_TOUCHSCREEN_FTS",
             "CONFIG_TOUCHSCREEN_GOODIX_BRL",
             "CONFIG_QTS_ENABLE"
         ],
@@ -121,6 +123,46 @@ def define_volcano(t,v):
         ],
 )
 
+def define_khaje(t,v):
+     define_target_variant_modules(
+        target = t,
+        variant = v,
+        registry = touch_driver_modules,
+        modules = [
+            "focaltech_fts",
+	        "qts"
+        ],
+        config_options = [
+            "TOUCH_DLKM_ENABLE",
+            "CONFIG_ARCH_KHAJE",
+            "CONFIG_ARCH_SCUBA",
+            "CONFIG_MSM_TOUCH",
+            "CONFIG_TOUCH_FOCALTECH",
+	        "CONFIG_QTS_ENABLE"
+        ],
+)
+
+
+def define_scuba(t,v):
+     define_target_variant_modules(
+        target = t,
+        variant = v,
+        registry = touch_driver_modules,
+        modules = [
+            "focaltech_fts",
+	        "qts"
+        ],
+        config_options = [
+            "TOUCH_DLKM_ENABLE",
+            "CONFIG_ARCH_KHAJE",
+            "CONFIG_ARCH_SCUBA",
+            "CONFIG_MSM_TOUCH",
+            "CONFIG_TOUCH_FOCALTECH",
+	        "CONFIG_QTS_ENABLE"
+        ],
+)
+
+
 def define_touch_target():
     for (t, v) in get_all_la_variants() + get_all_le_variants() + get_all_lxc_variants():
         if t == "blair":
@@ -131,5 +173,9 @@ def define_touch_target():
             define_monaco(t, v)
         elif t == "volcano":
             define_volcano(t, v)
+        elif t == "khaje":
+            define_khaje(t, v)
+        elif t == "scuba":
+            define_scuba(t, v)
         else:
             define_pineapple(t, v)

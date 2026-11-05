@@ -65,6 +65,24 @@ module_entry(
     ]
 )
 
+#define ddk_module() for focaltech_tp (ft3169)
+module_entry(
+    name = "focaltech_tp",
+    config_option = "CONFIG_TOUCHSCREEN_FTS",
+    srcs = [
+            "focaltech_touch_ft3169/focaltech_core.c",
+            "focaltech_touch_ft3169/focaltech_esdcheck.c",
+            "focaltech_touch_ft3169/focaltech_ex_fun.c",
+            "focaltech_touch_ft3169/focaltech_ex_mode.c",
+            "focaltech_touch_ft3169/focaltech_flash/focaltech_upgrade_ft3169.c",
+            "focaltech_touch_ft3169/focaltech_flash.c",
+            "focaltech_touch_ft3169/focaltech_gesture.c",
+            "focaltech_touch_ft3169/focaltech_i2c.c",
+            "focaltech_touch_ft3169/focaltech_point_report_check.c",
+            "focaltech_touch_ft3169/focaltech_proximity.c"
+    ]
+)
+
 #define ddk_module() for synaptics_tcm_ts
 module_entry(
     name = "synaptics_tcm_ts",
