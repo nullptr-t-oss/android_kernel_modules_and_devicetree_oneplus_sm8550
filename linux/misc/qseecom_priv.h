@@ -8,6 +8,7 @@
 
 #include <linux/types.h>
 
+#if !IS_ENABLED(CONFIG_QCOM_SI_CORE)
 #if IS_ENABLED(CONFIG_QSEECOM) || IS_ENABLED(CONFIG_ARCH_SA8155)
 
 int qseecom_process_listener_from_smcinvoke(uint32_t *result,
@@ -18,6 +19,7 @@ static inline int qseecom_process_listener_from_smcinvoke(uint32_t *result,
 {
         return -EOPNOTSUPP;
 }
+#endif
 #endif
 
 int get_qseecom_kernel_fun_ops(void);

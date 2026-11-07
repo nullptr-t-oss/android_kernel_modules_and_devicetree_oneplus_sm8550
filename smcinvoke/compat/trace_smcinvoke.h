@@ -1,17 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM smcinvoke
 
-#undef TRACE_INCLUDE_FILE
-#define TRACE_INCLUDE_FILE trace_smcinvoke
-
 #if !defined(_TRACE_SMCINVOKE) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_SMCINVOKE_H
 #include <linux/types.h>
+#include <linux/version.h>
 #include <linux/tracepoint.h>
 #include "smcinvoke.h"
 
@@ -298,7 +297,11 @@ TRACE_EVENT(process_log_info,
 		__field(uint32_t,	tzhandle)
 	),
 	TP_fast_assign(
+#if (KERNEL_VERSION(6, 10, 0) <= LINUX_VERSION_CODE)
+		__assign_str(str);
+#else
 		__assign_str(str, buf);
+#endif
 		__entry->context_type	= context_type;
 		__entry->tzhandle	= tzhandle;
 	),
@@ -352,8 +355,13 @@ TRACE_EVENT(status,
 		__string(str2,	status)
 	),
 	TP_fast_assign(
+#if (KERNEL_VERSION(6, 10, 0) <= LINUX_VERSION_CODE)
+		__assign_str(str);
+		__assign_str(str2);
+#else
 		__assign_str(str,	func);
 		__assign_str(str2,	status);
+#endif
 	),
 	TP_printk("%s status=%s", __get_str(str), __get_str(str2))
 );
@@ -489,7 +497,7 @@ TRACE_EVENT(smcinvoke_release,
 #endif /* _TRACE_SMCINVOKE_H */
 
 #undef TRACE_INCLUDE_PATH
-#define TRACE_INCLUDE_PATH ../../../../vendor/qcom/opensource/securemsm-kernel/smcinvoke
+#define TRACE_INCLUDE_PATH ../../../../vendor/qcom/opensource/securemsm-kernel/smcinvoke/compat
 
 #undef TRACE_INCLUDE_FILE
 #define TRACE_INCLUDE_FILE trace_smcinvoke

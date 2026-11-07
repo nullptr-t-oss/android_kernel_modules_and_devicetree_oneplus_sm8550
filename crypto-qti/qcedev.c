@@ -808,10 +808,9 @@ static int submit_req(struct qcedev_async_req *qcedev_areq,
 			if ((req_wait == 0) || (req_wait == -ERESTARTSYS)) {
 				pr_err("%s: request timed out, req_wait = %d\n",
 						__func__, req_wait);
-				list_del(&qcedev_areq->list);
-				podev->active_command = NULL;
+				list_del_init(&qcedev_areq->list);
 				spin_unlock_irqrestore(&podev->lock, flags);
-				return qcedev_areq->err;
+				return req_wait == 0 ? -ETIMEDOUT : req_wait;
 			}
 		}
 	} while (qcedev_areq->state != QCEDEV_REQ_SUBMITTED);

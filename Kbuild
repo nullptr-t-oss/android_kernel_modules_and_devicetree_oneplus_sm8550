@@ -37,7 +37,14 @@ ifeq ($(CONFIG_ARCH_QTI_VM), y)
 endif
 
 obj-$(CONFIG_QCOM_SMCINVOKE) += smcinvoke_dlkm.o
-smcinvoke_dlkm-objs := smcinvoke/smcinvoke_kernel.o smcinvoke/smcinvoke.o
+ifneq ($(filter y m,$(CONFIG_QCOM_SI_CORE)),)
+    smcinvoke_dlkm-objs := smcinvoke/si_core_xts/qseecom.o
+    smcinvoke_dlkm-objs += smcinvoke/si_core_xts/smci_kernel.o
+    smcinvoke_dlkm-objs += smcinvoke/si_core_xts/smci.o
+else
+    smcinvoke_dlkm-objs := smcinvoke/compat/smcinvoke_kernel.o
+    smcinvoke_dlkm-objs += smcinvoke/compat/smcinvoke.o
+endif
 
 obj-$(CONFIG_QTI_TZ_LOG) += tz_log_dlkm.o
 tz_log_dlkm-objs := tz_log/tz_log.o
