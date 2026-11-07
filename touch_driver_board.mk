@@ -43,10 +43,15 @@ ifeq ($(TOUCH_DLKM_ENABLE),  true)
                         else ifeq ($(TARGET_BOARD_PLATFORM), trinket)
                                 BOARD_VENDOR_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/synaptics_tcm_ts.ko
                         else ifeq ($(TARGET_BOARD_PLATFORM), pitti)
-                                BOARD_VENDOR_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/focaltech_fts.ko \
-                                        $(KERNEL_MODULES_OUT)/focaltech_tp.ko \
-                                        $(KERNEL_MODULES_OUT)/goodix_ts.ko \
-                                        $(KERNEL_MODULES_OUT)/qts.ko
+                                ifeq ($(TARGET_BOARD_SUFFIX), _wear32)
+                                    BOARD_VENDOR_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/focaltech_tp.ko \
+                                            $(KERNEL_MODULES_OUT)/qts.ko
+                                else
+                                    BOARD_VENDOR_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/focaltech_fts.ko \
+                                            $(KERNEL_MODULES_OUT)/focaltech_tp.ko \
+                                            $(KERNEL_MODULES_OUT)/goodix_ts.ko \
+                                            $(KERNEL_MODULES_OUT)/qts.ko
+                                endif
                         else ifeq ($(TARGET_BOARD_PLATFORM), volcano)
                                 BOARD_VENDOR_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/goodix_ts.ko \
                                         $(KERNEL_MODULES_OUT)/focaltech_fts.ko \

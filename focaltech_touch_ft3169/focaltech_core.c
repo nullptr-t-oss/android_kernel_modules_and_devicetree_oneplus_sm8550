@@ -2187,7 +2187,7 @@ static int drm_check_dt(struct fts_ts_data *ts_data)
     }
 
     FTS_ERROR("no find drm_panel");
-    return -ENODEV;
+    return PTR_ERR(panel);
 }
 #endif
 
@@ -2367,6 +2367,15 @@ int fts_ts_probe_entry(struct fts_ts_data *ts_data)
     if (ret) {
         FTS_ERROR("device-tree parse fail");
     }
+
+#if (defined(FTS_DRM_PANEL_NOTIFY) || defined(FTS_QCOM_PANEL_EVENT_NOTIFY))
+    ret = drm_check_dt(ts_data);
+    if (ret) {
+        FTS_ERROR("parse drm-panel fail, ret=%d", ret);
+        kfree_safe(ts_data->pdata);
+        return ret;
+    }
+#endif
 
     ts_data->ts_workqueue = create_singlethread_workqueue("fts_wq");
     if (!ts_data->ts_workqueue) {
