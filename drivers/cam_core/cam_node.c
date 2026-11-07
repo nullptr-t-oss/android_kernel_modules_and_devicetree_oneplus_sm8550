@@ -426,6 +426,7 @@ static int __cam_node_handle_release_dev(struct cam_node *node,
 {
 	int rc = 0;
 	struct cam_context *ctx = NULL;
+	bool put_ctx = false;
 
 	if (!release)
 		return -EINVAL;
@@ -460,22 +461,23 @@ static int __cam_node_handle_release_dev(struct cam_node *node,
 		if (rc)
 			CAM_ERR(CAM_CORE, "context release failed for node %s",
 				node->name);
+
+		put_ctx = true;
 	} else {
 		CAM_WARN(CAM_CORE,
 			"node %s context id %u state %d invalid to release hdl",
 			node->name, ctx->ctx_id, ctx->state);
-		goto destroy_dev_hdl;
 	}
 
-	cam_context_putref(ctx);
-
-destroy_dev_hdl:
 	rc = cam_destroy_device_hdl(release->dev_handle);
 	if (rc)
 		CAM_ERR(CAM_CORE, "destroy device hdl failed for node %s",
 			node->name);
 	else
 		ctx->dev_hdl = -1;
+
+	if (put_ctx)
+		cam_context_putref(ctx);
 
 	CAM_DBG(CAM_CORE, "[%s] Release ctx_id=%d, refcount=%d",
 		node->name, ctx->ctx_id,
