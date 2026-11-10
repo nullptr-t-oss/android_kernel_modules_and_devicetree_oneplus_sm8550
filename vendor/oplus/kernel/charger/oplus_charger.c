@@ -281,6 +281,10 @@ static ATOMIC_NOTIFIER_HEAD(charger_mutual_notifier);
 module_param(chgr_dbg_total_time, int, 0644);
 MODULE_PARM_DESC(chgr_dbg_total_time, "debug charger total time");
 
+static bool sdp_900ma = false;
+module_param(sdp_900ma, bool, 0644);
+MODULE_PARM_DESC(sdp_900ma, "allow 900mA input current on SDP (non-spec)");
+
 bool __attribute__((weak)) oplus_is_ptcrb_version(void)
 {
 	return false;
@@ -7033,6 +7037,8 @@ void oplus_chg_set_input_current_limit(struct oplus_chg_chip *chip)
 		return;
 	case POWER_SUPPLY_TYPE_USB:
 		current_limit = chip->limits.input_current_usb_ma;
+		if (sdp_900ma)
+			current_limit = max(current_limit, OPLUS_CHG_900_CHARGING_CURRENT);
 		break;
 	case POWER_SUPPLY_TYPE_USB_DCP:
 		current_limit = chip->limits.input_current_charger_ma;
