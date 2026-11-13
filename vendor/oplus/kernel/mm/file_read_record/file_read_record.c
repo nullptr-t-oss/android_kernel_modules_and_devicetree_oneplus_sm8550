@@ -28,6 +28,8 @@
 #include <trace/hooks/mm.h>
 
 #undef CONFIG_OPLUS_MM_FRR_DEBUG_LOCAL
+#define CONFIG_OPLUS_MM_FRR_DEBUG 1
+#define CONFIG_OPLUS_MM_FRR_DEBUG_LOCAL 1
 
 #define FILEPATH_STR_MAX (256)
 #define FRR_PROC_CMD_BUF_MAX (128)
