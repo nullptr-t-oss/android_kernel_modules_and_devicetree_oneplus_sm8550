@@ -392,7 +392,7 @@ def get_ic_cfg_version(cfg, path=None):
     if version == "":
         v_version = "V1.0"
     else:
-        match = re.match("V[0-9]+\.[0-9]+:[0-9]+:[0-9a-f]+", version, flags=0)
+        match = re.match(r"V[0-9]+\.[0-9]+:[0-9]+:[0-9a-f]+", version, flags=0)
         if match is None:
             show_error(ic_cfg_path +
                        ": version format error, you can use: \"V1.0:%d:%s\"" %
@@ -693,12 +693,12 @@ def func_add_para(type, name):
         type = re.sub(match, replace_func_pointer, type)
         return type
 
-    match = re.search("\[\]", type, flags=0)
+    match = re.search(r"\[\]", type, flags=0)
     if match:
         type = type.replace("[]", " " + name + "[]")
         return type
 
-    match = re.search("\*", type, flags=0)
+    match = re.search(r"\*", type, flags=0)
     if match:
         type = type.replace("*", "*" + name)
         return type
