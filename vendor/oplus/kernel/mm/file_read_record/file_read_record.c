@@ -20,14 +20,20 @@
 #include <linux/device.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE)
-#include "../mm_osvelte/mm-config.h"
-#endif
 
 // #include <trace/hooks/fs.h>
 #include <trace/hooks/mm.h>
 
 #undef CONFIG_OPLUS_MM_FRR_DEBUG_LOCAL
+
+/*
+ * self-contained parameter, replaces the osvelte (cmdline + DT) checks
+ */
+static bool frr_enable = true;
+module_param_named(enable, frr_enable, bool, 0444);
+MODULE_PARM_DESC(enable, "enable oplus file read record");
+static bool frr_active;
+
 
 #define FILEPATH_STR_MAX (256)
 #define FRR_PROC_CMD_BUF_MAX (128)
@@ -879,8 +885,11 @@ ssize_t oplus_frr_read(struct file *file, char __user *buf, size_t count, loff_t
 	ssize_t  len = 0;
 
 	monitor = get_io_monitor(IO_MONITOR_TYPE_READ);
+	if (!monitor)
+		return -FRR_EMONITOR_NOT_INIT;
+
 	spin_lock(&monitor->m_lock);
-	if (!monitor || monitor->format_buf == NULL ||
+	if (monitor->format_buf == NULL ||
 		monitor->status != IO_MONITOR_STATUS_FINISHED) {
 		pr_err("io monitor failed, status not ready\n");
 		spin_unlock(&monitor->m_lock);
@@ -961,22 +970,29 @@ static const struct proc_ops oplus_frr_debug_fops = {
 };
 #endif
 
+/* create under /proc/oplus_mem/ without tripping the "already registered" WARN. */
+static struct proc_dir_entry *frr_proc_create(const char *path, const struct proc_ops *ops)
+{
+	struct proc_dir_entry *pe = proc_create(path, 0600, NULL, ops);
+
+	if (!pe) {
+		/* oplus_mem may not exist yet */
+		proc_mkdir("oplus_mem", NULL);
+		pe = proc_create(path, 0600, NULL, ops);
+	}
+	return pe;
+}
+
 static bool oplus_frr_proc_create(void)
 {
-	struct proc_dir_entry *pe;
-	struct proc_dir_entry *root_dir_entry = proc_mkdir("oplus_mem", NULL);
-
-	pe = proc_create((root_dir_entry ? "oplus_frr" : "oplus_mem/oplus_frr"),
-		0666, root_dir_entry, &oplus_frr_fops);
-	if (!pe) {
+	if (!frr_proc_create("oplus_mem/oplus_frr", &oplus_frr_fops)) {
 		pr_err("Failed to register oplus_frr proc interface\n");
 		return false;
 	}
 #ifdef CONFIG_OPLUS_MM_FRR_DEBUG
-	pe = proc_create((root_dir_entry ? "oplus_frr_debug" : "oplus_mem/oplus_frr_debug"),
-		0666, root_dir_entry, &oplus_frr_debug_fops);
-	if (!pe) {
+	if (!frr_proc_create("oplus_mem/oplus_frr_debug", &oplus_frr_debug_fops)) {
 		pr_err("Failed to register oplus_frr_debug proc interface\n");
+		remove_proc_entry("oplus_mem/oplus_frr", NULL);
 		return false;
 	}
 #endif
@@ -1007,20 +1023,11 @@ static int __init file_read_record_init(void)
 static __attribute__((unused)) int file_read_record_init(void)
 #endif
 {
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE)
-	struct config_frr *config = NULL;
-
-	if (oplus_test_mm_feature_disable(COMFD1_FRR)) {
-		pr_info("FRR is disabled in cmdline\n");
+	if (!frr_enable) {
+		pr_info("File Read Record is disabled by module parameter\n");
 		return 0;
 	}
 
-	config = oplus_read_mm_config(module_name_frr);
-	if (!config || !config->enable) {
-		pr_info("%s is disabled in dts\n", module_name_frr);
-		return 0;
-	}
-#endif
 	if (!oplus_frr_proc_create())
 	   return -1;
 
@@ -1033,6 +1040,7 @@ static __attribute__((unused)) int file_read_record_init(void)
 		return -1;
 	}
 	io_monitor_hook_register();
+	frr_active = true;
 	pr_info("File Read Record init ok\n");
 	return 0;
 }
@@ -1043,9 +1051,15 @@ static void __exit file_read_record_exit(void)
 static __attribute__((unused)) void __exit file_read_record_exit(void)
 #endif
 {
+	if (!frr_active)
+		return;
+
+	io_monitor_hook_unregister();
+	tracepoint_synchronize_unregister();
 	oplus_frr_proc_remove();
 	io_monitor_free(g_read_monitor);
-	io_monitor_hook_unregister();
+	g_read_monitor = NULL;
+	frr_active = false;
 }
 
 #ifndef CONFIG_OPLUS_MM_FRR_KUNIT
