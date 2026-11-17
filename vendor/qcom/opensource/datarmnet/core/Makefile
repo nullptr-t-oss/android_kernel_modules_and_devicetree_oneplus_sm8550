@@ -36,8 +36,9 @@ rmnet_ctl-y += 		rmnet_ctl_client.o \
 endif
 
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
+M ?= $(PWD)
 
-KBUILD_OPTIONS := RMNET_CORE_ROOT=$(PWD)
+KBUILD_OPTIONS := RMNET_CORE_ROOT=$(KERNEL_SRC)/$(M)
 KBUILD_OPTIONS += MODNAME?=rmnet_core
 
 all:
