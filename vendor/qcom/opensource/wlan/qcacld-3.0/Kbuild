@@ -88,14 +88,14 @@ $(foreach cfg, $(WLAN_CFG_OVERRIDE), \
 # set in the kernel sources.  When a GKI kernel is used, there isn't a
 # flag set in the sources, so set the flag here if we are building
 # with GKI kernel where the feature is present
-KERNEL_VERSION = $(shell echo $$(( ( $(or $(1),0) << 16 ) + ( $(or $(2),0) << 8 ) + $(or $(3),0) )))
-LINUX_CODE := $(call KERNEL_VERSION,$(VERSION),$(PATCHLEVEL),$(SUBLEVEL))
+QCA_KERNEL_VERSION = $(shell echo $$(( ( $(or $(1),0) << 16 ) + ( $(or $(2),0) << 8 ) + $(or $(3),0) )))
+LINUX_CODE := $(call QCA_KERNEL_VERSION,$(VERSION),$(PATCHLEVEL),$(SUBLEVEL))
 
 # Comosite feature was added to GKI 5.10.20
-COMPOSITE_CODE_ADDED := 330260 # hardcoded $(call KERNEL_VERSION,5,10,20)
+COMPOSITE_CODE_ADDED := 330260 # hardcoded $(call QCA_KERNEL_VERSION,5,10,20)
 
 # Comosite feature was not ported beyond 5.10.x
-COMPOSITE_CODE_REMOVED := 330496 # hardcoded $(call KERNEL_VERSION,5,11,0)
+COMPOSITE_CODE_REMOVED := 330496 # hardcoded $(call QCA_KERNEL_VERSION,5,11,0)
 
 ifeq ($(KERNEL_SUPPORTS_NESTED_COMPOSITES),)
   #flag is not explicitly present
