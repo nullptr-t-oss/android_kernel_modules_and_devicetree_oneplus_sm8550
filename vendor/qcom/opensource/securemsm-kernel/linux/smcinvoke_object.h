@@ -9,6 +9,7 @@
 #include <linux/types.h>
 #include <linux/firmware.h>
 #include <linux/qtee_shmbridge.h>
+#include "smcinvoke.h"
 
 /*
  * Method bits are not modified by transport layers.  These describe the
