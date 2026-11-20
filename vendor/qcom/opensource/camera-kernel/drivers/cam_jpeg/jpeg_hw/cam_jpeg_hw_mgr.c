@@ -248,6 +248,13 @@ static int cam_jpeg_process_next_hw_update(void *priv, void *data,
 	ctx_data = (struct cam_jpeg_hw_ctx_data *)data;
 	dev_type = ctx_data->jpeg_dev_acquire_info.dev_type;
 	p_cfg_req = hw_mgr->dev_hw_cfg_args[dev_type][0];
+	if (!p_cfg_req) {
+		CAM_ERR(CAM_JPEG, "cfg req is NULL for dev_type %u, device may have been flushed",
+			dev_type);
+		buf_data->evt_param = CAM_SYNC_JPEG_EVENT_INVLD_CMD;
+		return -EINVAL;
+	}
+
 	config_args = (struct cam_hw_config_args *)&p_cfg_req->hw_cfg_args;
 
 	if (!hw_mgr->devices[dev_type][0]->hw_ops.reset) {

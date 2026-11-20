@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef CAM_OPE_DEV_INTF_H
@@ -143,6 +144,17 @@ struct cam_ope_irq_data {
 };
 
 /**
+ * struct ope_dmi_dma_range
+ *
+ * @start: Inclusive IOVA start address for a valid DMI DMA window
+ * @end:   Exclusive IOVA end address for a valid DMI DMA window
+ */
+struct ope_dmi_dma_range {
+	uint64_t start;
+	uint64_t end;
+};
+
+/**
  * struct cam_ope_dev_prepare_req
  *
  * @hw_mgr:         OPE hardware manager
@@ -154,6 +166,8 @@ struct cam_ope_irq_data {
  * @frame_process:  Frame process command
  * @req_idx:        Request Index
  * @kmd_buf_offset: KMD buffer offset
+ * @dmi_dma_ranges: Valid DMI DMA ranges collected from packet patches
+ * @num_dmi_dma_ranges: Number of valid DMI DMA ranges
  */
 struct cam_ope_dev_prepare_req {
 	struct cam_ope_hw_mgr *hw_mgr;
@@ -165,6 +179,8 @@ struct cam_ope_dev_prepare_req {
 	struct ope_frame_process *frame_process;
 	uint32_t req_idx;
 	uint32_t kmd_buf_offset;
+	struct ope_dmi_dma_range *dmi_dma_ranges;
+	uint32_t num_dmi_dma_ranges;
 };
 
 int cam_ope_top_process(struct ope_hw *ope_hw_info,
@@ -183,4 +199,3 @@ int cam_ope_subdev_init_module(void);
 void cam_ope_subdev_exit_module(void);
 
 #endif /* CAM_OPE_DEV_INTF_H */
-
